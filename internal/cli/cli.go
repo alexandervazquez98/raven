@@ -27,6 +27,8 @@ func RunWithInput(args []string, configDir string, stdin io.Reader, stdout, stde
 	switch args[0] {
 	case "ci":
 		return runCI(args[1:], configDir, stdout, stderr)
+	case "alias":
+		return runAlias(args[1:], configDir, stdout, stderr)
 	case "event":
 		return runEvent(args[1:], configDir, stdin, stdout, stderr)
 	case "timeline":
@@ -158,6 +160,142 @@ func runCIShow(args []string, configDir string, stdout, stderr io.Writer) error 
 	if strings.TrimSpace(component.Notes) != "" {
 		fmt.Fprintf(stdout, "Notes: %s\n", component.Notes)
 	}
+	return nil
+}
+
+func runAlias(args []string, configDir string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		err := errors.New("alias subcommand is required")
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	switch args[0] {
+	case "add":
+		return runAliasAdd(args[1:], configDir, stdout, stderr)
+	case "list":
+		return runAliasList(args[1:], configDir, stdout, stderr)
+	case "resolve":
+		return runAliasResolve(args[1:], configDir, stdout, stderr)
+	default:
+		err := fmt.Errorf("unknown alias subcommand %q", args[0])
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+}
+
+func runAliasAdd(args []string, configDir string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("alias add", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	ciID := flags.String("ci-id", "", "canonical CI ID")
+	source := flags.String("source", "", "alias source namespace")
+	aliasType := flags.String("type", "", "alias type")
+	value := flags.String("value", "", "alias value")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		err := fmt.Errorf("alias add does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	alias := domain.Alias{
+		CIID:   *ciID,
+		Source: *source,
+		Type:   domain.AliasType(*aliasType),
+		Value:  *value,
+	}
+	if err := alias.Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	_, inventory, err := loadInventory(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	if _, err := inventory.Get(alias.CIID); err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	_, registry, err := loadAliasRegistry(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	if err := registry.Add(alias); err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	aliases := registry.List()
+	if err := storage.SaveAliases(app.AliasesPath(configDir), aliases); err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	alias = alias.Normalize()
+	fmt.Fprintf(stdout, "added alias %s %s %s -> %s\n", alias.Source, alias.Type, alias.Value, alias.CIID)
+	return nil
+}
+
+func runAliasList(args []string, configDir string, stdout, stderr io.Writer) error {
+	if len(args) != 0 {
+		err := errors.New("alias list does not accept arguments")
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	aliases, _, err := loadAliasRegistry(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	if len(aliases) == 0 {
+		fmt.Fprintln(stdout, "No aliases yet.")
+		return nil
+	}
+
+	fmt.Fprintln(stdout, "Source\tType\tValue\tCI ID")
+	for _, alias := range aliases {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", alias.Source, alias.Type, alias.Value, alias.CIID)
+	}
+	return nil
+}
+
+func runAliasResolve(args []string, configDir string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("alias resolve", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	source := flags.String("source", "", "alias source namespace")
+	aliasType := flags.String("type", "", "alias type")
+	value := flags.String("value", "", "alias value")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		err := fmt.Errorf("alias resolve does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	key := domain.AliasKey{Source: *source, Type: domain.AliasType(*aliasType), Value: *value}
+	if err := key.Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	_, registry, err := loadAliasRegistry(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	ciID, err := registry.Resolve(key)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	fmt.Fprintln(stdout, ciID)
 	return nil
 }
 
@@ -491,4 +629,19 @@ func loadInventory(configDir string) ([]domain.Component, *domain.Inventory, err
 		}
 	}
 	return components, inventory, nil
+}
+
+func loadAliasRegistry(configDir string) ([]domain.Alias, *domain.AliasRegistry, error) {
+	aliases, err := storage.LoadAliases(app.AliasesPath(configDir))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	registry := domain.NewAliasRegistry()
+	for _, alias := range aliases {
+		if err := registry.Add(alias); err != nil {
+			return nil, nil, err
+		}
+	}
+	return aliases, registry, nil
 }

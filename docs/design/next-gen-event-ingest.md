@@ -96,7 +96,8 @@ raven timeline RAVEN-DEV-001
 
 ## Rules for AI adapters
 
-- Do not create or update Raven records without a CI ID unless an explicit unresolved-event flow exists.
+- Do not create or update Raven records without a canonical Raven CI ID unless an explicit unresolved-event flow exists.
+- Treat `next-gen` IDs as aliases/references, not Raven identity. Resolve them with `raven alias resolve --source next-gen --type ci_id --value <id>`.
 - If the payload has IP, hostname, serial, or MAC but no CI ID, resolve through aliases before ingesting.
 - Preserve source evidence. The summary is AI-generated; the source metadata is the audit trail.
 - Use a stable `dedup_key`, preferably `<source>:<external_id>` when available.
@@ -108,14 +109,25 @@ Implemented Raven surfaces:
 
 1. `Event` domain model.
 2. JSON event storage at `~/.config/raven/events.json`.
-3. CLI commands: `event add`, `event capture`, `event ingest`, and `timeline`.
-4. `event ingest` accepts exactly one input source: `--file <json>` or `--stdin`.
-5. Deduplication by `dedup_key` for structured ingest.
+3. JSON alias/reference storage at `~/.config/raven/aliases.json`.
+4. CLI commands: `event add`, `event capture`, `event ingest`, `timeline`, `alias add`, `alias list`, and `alias resolve`.
+5. `event ingest` accepts exactly one input source: `--file <json>` or `--stdin`.
+6. Deduplication by `dedup_key` for structured ingest.
+
+Alias setup examples:
+
+```bash
+raven alias add --ci-id RAVEN-FW-MAIN-001 --source next-gen --type ci_id --value 42
+raven alias add --ci-id RAVEN-FW-MAIN-001 --source next-gen --type hostname --value fw-main
+raven alias resolve --source next-gen --type ci_id --value 42
+```
+
+The alias key is `source + type + value`; the canonical target remains Raven's `ci_id`. Alias values are exact-match after trimming whitespace, so adapters should normalize hostname, MAC, IP, serial, and upstream ID formats before calling `alias add` or `alias resolve`.
 
 ## Next step
 
 Continue with one of:
 
-1. Alias resolution for IP/hostname/serial/MAC to `ci_id` if `next-gen` cannot provide CI IDs directly.
+1. next-gen adapter/ingest alias lookup for IP/hostname/serial/MAC to `ci_id`.
 2. `raven setup <agent>` automation for Gemini/Ollama/Codex/OpenCode instruction insertion.
 3. SQLite storage once CIs, events, aliases, and ingest contracts stabilize.

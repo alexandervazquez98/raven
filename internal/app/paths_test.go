@@ -24,3 +24,13 @@ func TestEventsPathUsesUserConfigDir(t *testing.T) {
 		t.Fatalf("EventsPath() = %q, want %q", got, want)
 	}
 }
+
+func TestAliasesPathUsesUserConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+
+	got := AliasesPath(configDir)
+	want := filepath.Join(configDir, "raven", "aliases.json")
+	if got != want {
+		t.Fatalf("AliasesPath() = %q, want %q", got, want)
+	}
+}

@@ -91,7 +91,8 @@ Agents should inspect the timeline before making repeated or historical claims.
 
 ```text
 You are using Raven as a CMDB/timeline memory layer.
-Before recording an event, identify the CI ID. Do not invent one.
+Before recording an event, identify the CI ID. Do not invent one. If you have an upstream ID or operational identifier, resolve it through aliases first:
+  raven alias resolve --source <source> --type <ci_id|ip|hostname|serial|mac> --value <value>
 If you only have freeform diagnostic text, use:
   raven event capture <ci-id> --source <your-agent-name> --type <type> --severity <severity> --text "..."
 If you have normalized event data with a source event ID, use either:
@@ -101,13 +102,26 @@ or pipe JSON directly:
 Preserve evidence. Keep summaries short. Use the CI timeline before making historical claims.
 ```
 
+## Alias/reference resolution
+
+Raven owns canonical `ci_id` values. Upstream identifiers such as `next-gen` CI IDs are references, not Raven identity. Store them as aliases before relying on them in adapters:
+
+```bash
+raven alias add --ci-id RAVEN-FW-MAIN-001 --source next-gen --type ci_id --value 42
+raven alias add --ci-id RAVEN-FW-MAIN-001 --source next-gen --type hostname --value fw-main
+raven alias list
+raven alias resolve --source next-gen --type ci_id --value 42
+```
+
+Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source + type + value`; Raven rejects unknown canonical CIs and duplicate or conflicting mappings. Alias values are exact-match after trimming whitespace, so adapters should pass a consistent hostname, MAC, IP, serial, or upstream ID format.
+
 ## Current limitations
 
-- Alias resolution is not implemented yet, so IP/hostname/serial cannot automatically resolve to CI ID.
+- Event ingest still expects a canonical `ci_id`; resolving event payloads by alias belongs in the adapter/ingest slice.
 - SQLite is not implemented yet; Raven currently stores local JSON files under the user config directory.
 
 ## Next steps
 
-1. Add alias commands for IP/hostname/serial to CI ID.
+1. Add next-gen adapter/ingest alias lookup for IP/hostname/serial/MAC to `ci_id`.
 2. Automate agent setup instructions from `docs/agent-setup.md`.
 3. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.

@@ -167,6 +167,167 @@ func TestRunCIListEmpty(t *testing.T) {
 	}
 }
 
+func TestRunAliasAddListAndResolve(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if err := Run([]string{"ci", "add", "--ci-id", "RAVEN-FW-MAIN-001", "--category", "network", "--model", "FortiGate"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+
+	err := Run([]string{"alias", "add", "--ci-id", "RAVEN-FW-MAIN-001", "--source", "next-gen", "--type", "ci_id", "--value", "42"}, configDir, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Run(alias add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "added alias next-gen ci_id 42 -> RAVEN-FW-MAIN-001") {
+		t.Fatalf("stdout = %q, want alias add confirmation", stdout.String())
+	}
+
+	aliases, err := storage.LoadAliases(app.AliasesPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadAliases() error = %v, want nil", err)
+	}
+	if len(aliases) != 1 || aliases[0].CIID != "RAVEN-FW-MAIN-001" || aliases[0].Source != "next-gen" || aliases[0].Type != "ci_id" || aliases[0].Value != "42" {
+		t.Fatalf("stored aliases = %#v, want next-gen ci_id 42 mapping", aliases)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := Run([]string{"alias", "resolve", "--source", "next-gen", "--type", "ci_id", "--value", "42"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(alias resolve) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "RAVEN-FW-MAIN-001" {
+		t.Fatalf("stdout = %q, want canonical ci id", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := Run([]string{"alias", "list"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(alias list) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	for _, want := range []string{"Source\tType\tValue\tCI ID", "next-gen\tci_id\t42\tRAVEN-FW-MAIN-001"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+		}
+	}
+}
+
+func TestRunAliasAddRejectsUnknownCI(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"alias", "add", "--ci-id", "MISSING", "--source", "next-gen", "--type", "ci_id", "--value", "42"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(alias add unknown CI) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "component not found") {
+		t.Fatalf("stderr = %q, want not found error", stderr.String())
+	}
+}
+
+func TestRunAliasAddRejectsDuplicateAndConflict(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	for _, args := range [][]string{
+		{"ci", "add", "--ci-id", "RAVEN-FW-MAIN-001", "--category", "network", "--model", "FortiGate"},
+		{"ci", "add", "--ci-id", "RAVEN-FW-BACKUP-001", "--category", "network", "--model", "FortiGate Backup"},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		if err := Run(args, configDir, &stdout, &stderr); err != nil {
+			t.Fatalf("Run(%v) error = %v, want nil; stderr=%q", args, err, stderr.String())
+		}
+	}
+
+	args := []string{"alias", "add", "--ci-id", "RAVEN-FW-MAIN-001", "--source", "next-gen", "--type", "ci_id", "--value", "42"}
+	stdout.Reset()
+	stderr.Reset()
+	if err := Run(args, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(first alias add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err := Run(args, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(duplicate alias add) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "alias already exists") {
+		t.Fatalf("stderr = %q, want duplicate alias error", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = Run([]string{"alias", "add", "--ci-id", "RAVEN-FW-BACKUP-001", "--source", "next-gen", "--type", "ci_id", "--value", "42"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(conflicting alias add) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "alias conflicts with existing ci id") {
+		t.Fatalf("stderr = %q, want conflict alias error", stderr.String())
+	}
+}
+
+func TestRunAliasListEmpty(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if err := Run([]string{"alias", "list"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(alias list) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No aliases yet.") {
+		t.Fatalf("stdout = %q, want empty alias message", stdout.String())
+	}
+}
+
+func TestRunAliasResolveMissing(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"alias", "resolve", "--source", "next-gen", "--type", "ci_id", "--value", "42"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(alias resolve missing) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "alias not found") {
+		t.Fatalf("stderr = %q, want not found error", stderr.String())
+	}
+}
+
+func TestRunAliasCommandsRejectExtraArgs(t *testing.T) {
+	configDir := t.TempDir()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "add", args: []string{"alias", "add", "--ci-id", "RAVEN-FW-MAIN-001", "--source", "next-gen", "--type", "ci_id", "--value", "42", "extra"}, want: "alias add does not accept positional arguments"},
+		{name: "list", args: []string{"alias", "list", "extra"}, want: "alias list does not accept arguments"},
+		{name: "resolve", args: []string{"alias", "resolve", "--source", "next-gen", "--type", "ci_id", "--value", "42", "extra"}, want: "alias resolve does not accept positional arguments"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			err := Run(tt.args, configDir, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Run(alias extra args) error = nil, want error")
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestRunEventAddAndTimeline(t *testing.T) {
 	configDir := t.TempDir()
 	var stdout bytes.Buffer
