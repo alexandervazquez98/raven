@@ -43,11 +43,15 @@ If `--summary` is omitted, Raven uses the first line of `--text`.
 raven event ingest --source next-gen --file alert.json
 ```
 
-Required normalized fields for adapter ingest:
+Required normalized fields for adapter ingest include either Raven's canonical `ci_id` or an explicit `ci_ref` alias reference:
 
 ```json
 {
-  "ci_id": "FW-MAIN-001",
+  "ci_ref": {
+    "source": "next-gen",
+    "type": "ci_id",
+    "value": "42"
+  },
   "type": "network_alert",
   "severity": "warning",
   "summary": "High packet loss detected on WAN link",
@@ -55,6 +59,8 @@ Required normalized fields for adapter ingest:
   "observed_at": "2026-05-28T21:00:00Z"
 }
 ```
+
+If `ci_id` is present, Raven uses it directly. If `ci_id` is absent and `ci_ref` is present, Raven resolves `source + type + value` through aliases before storing the event.
 
 `external_id` or `dedup_key` is required so replays do not create duplicates. When `--source` and `external_id` are present, Raven derives:
 
@@ -74,7 +80,8 @@ Agents should inspect the timeline before making repeated or historical claims.
 
 | Field | Meaning |
 | --- | --- |
-| `ci_id` | Stable Raven topic/CI identity. |
+| `ci_id` | Stable Raven topic/CI identity. Use when already known. |
+| `ci_ref` | Optional alias lookup object (`source`, `type`, `value`) for ingest payloads that do not yet know canonical `ci_id`. |
 | `type` | Flexible event type, e.g. `observation`, `diagnosis`, `network_alert`, `maintenance`, `config_change`, `incident`, `resolution`. |
 | `severity` | Flexible severity, e.g. `info`, `warning`, `critical`. |
 | `status` | Optional state, e.g. `open`, `triaged`, `resolved`. Defaults to `open`. |
@@ -91,7 +98,7 @@ Agents should inspect the timeline before making repeated or historical claims.
 
 ```text
 You are using Raven as a CMDB/timeline memory layer.
-Before recording an event, identify the CI ID. Do not invent one. If you have an upstream ID or operational identifier, resolve it through aliases first:
+Before recording an event, identify the CI ID. Do not invent one. If you have an upstream ID or operational identifier, either include it as `ci_ref` in normalized ingest JSON or resolve it through aliases first:
   raven alias resolve --source <source> --type <ci_id|ip|hostname|serial|mac> --value <value>
 If you only have freeform diagnostic text, use:
   raven event capture <ci-id> --source <your-agent-name> --type <type> --severity <severity> --text "..."
@@ -117,11 +124,11 @@ Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source 
 
 ## Current limitations
 
-- Event ingest still expects a canonical `ci_id`; resolving event payloads by alias belongs in the adapter/ingest slice.
+- Raven does not create unresolved events yet; ingest fails if neither `ci_id` nor a resolvable `ci_ref` identifies the CI.
 - SQLite is not implemented yet; Raven currently stores local JSON files under the user config directory.
 
 ## Next steps
 
-1. Add next-gen adapter/ingest alias lookup for IP/hostname/serial/MAC to `ci_id`.
+1. Add a dedicated next-gen adapter command or script that emits normalized `ci_ref` event payloads.
 2. Automate agent setup instructions from `docs/agent-setup.md`.
 3. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.

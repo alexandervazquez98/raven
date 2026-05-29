@@ -509,13 +509,13 @@ func runEventIngest(args []string, configDir string, stdin io.Reader, stdout, st
 		}
 	}
 
-	var event domain.Event
-	if err := json.Unmarshal(data, &event); err != nil {
+	var payload ingestEventPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
 		err = fmt.Errorf("decode ingest event: %w", err)
 		fmt.Fprintln(stderr, err)
 		return err
 	}
-	event = event.Normalize()
+	event := payload.Event.Normalize()
 	if strings.TrimSpace(*source) != "" {
 		event.Source = strings.TrimSpace(*source)
 	}
@@ -535,6 +535,25 @@ func runEventIngest(args []string, configDir string, stdin io.Reader, stdout, st
 	}
 	if event.IngestedAt.IsZero() {
 		event.IngestedAt = time.Now().UTC()
+	}
+	if event.CIID == "" {
+		if payload.CIRef == nil {
+			err := errors.New("event ingest requires ci_id or ci_ref")
+			fmt.Fprintln(stderr, err)
+			return err
+		}
+		_, registry, err := loadAliasRegistry(configDir)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return err
+		}
+		ciID, err := registry.Resolve(payload.CIRef.AliasKey())
+		if err != nil {
+			err = fmt.Errorf("resolve ci_ref %s %s %s: %w", payload.CIRef.Source, payload.CIRef.Type, payload.CIRef.Value, err)
+			fmt.Fprintln(stderr, err)
+			return err
+		}
+		event.CIID = ciID
 	}
 
 	_, inventory, err := loadInventory(configDir)
@@ -559,6 +578,21 @@ func runEventIngest(args []string, configDir string, stdin io.Reader, stdout, st
 	}
 	fmt.Fprintf(stdout, "ingested event %s for CI %s\n", event.ID, event.CIID)
 	return nil
+}
+
+type ingestEventPayload struct {
+	domain.Event
+	CIRef *ingestCIRef `json:"ci_ref,omitempty"`
+}
+
+type ingestCIRef struct {
+	Source string           `json:"source"`
+	Type   domain.AliasType `json:"type"`
+	Value  string           `json:"value"`
+}
+
+func (r ingestCIRef) AliasKey() domain.AliasKey {
+	return domain.AliasKey{Source: r.Source, Type: r.Type, Value: r.Value}
 }
 
 func runTimeline(args []string, configDir string, stdout, stderr io.Writer) error {

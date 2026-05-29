@@ -625,6 +625,175 @@ func TestRunEventIngestFromStdin(t *testing.T) {
 	}
 }
 
+func TestRunEventIngestResolvesCIRefAlias(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if err := Run([]string{"ci", "add", "--ci-id", "FW-MAIN-001", "--category", "network", "--model", "FortiGate"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := Run([]string{"alias", "add", "--ci-id", "FW-MAIN-001", "--source", "next-gen", "--type", "ci_id", "--value", "42"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(alias add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	payload := `{
+		"ci_ref":{"source":"next-gen","type":"ci_id","value":"42"},
+		"type":"network_alert",
+		"severity":"warning",
+		"summary":"High packet loss detected on WAN link",
+		"external_id":"ng-ref-001",
+		"observed_at":"2026-05-28T21:00:00Z"
+	}`
+
+	stdout.Reset()
+	stderr.Reset()
+	err := RunWithInput([]string{"event", "ingest", "--source", "next-gen", "--stdin"}, configDir, strings.NewReader(payload), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunWithInput(event ingest ci_ref) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ingested event") || !strings.Contains(stdout.String(), "FW-MAIN-001") {
+		t.Fatalf("stdout = %q, want ingest confirmation with canonical CI", stdout.String())
+	}
+
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadEvents() error = %v, want nil", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(events))
+	}
+	if events[0].CIID != "FW-MAIN-001" || events[0].DedupKey != "next-gen:ng-ref-001" || events[0].ExternalID != "ng-ref-001" {
+		t.Fatalf("event = %#v, want canonical CI with unchanged external_id/dedup behavior", events[0])
+	}
+}
+
+func TestRunEventIngestRejectsUnknownCIRef(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	payload := `{
+		"ci_ref":{"source":"next-gen","type":"ci_id","value":"missing"},
+		"type":"network_alert",
+		"severity":"warning",
+		"summary":"High packet loss detected",
+		"external_id":"ng-missing-ref",
+		"observed_at":"2026-05-28T21:00:00Z"
+	}`
+
+	err := RunWithInput([]string{"event", "ingest", "--source", "next-gen", "--stdin"}, configDir, strings.NewReader(payload), &stdout, &stderr)
+	if err == nil {
+		t.Fatal("RunWithInput(event ingest unknown ci_ref) error = nil, want error")
+	}
+	for _, want := range []string{"resolve ci_ref next-gen ci_id missing", "alias not found"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+		}
+	}
+
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadEvents() error = %v, want nil", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events length = %d, want 0 after failed ci_ref resolution", len(events))
+	}
+}
+
+func TestRunEventIngestRejectsInvalidCIRef(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	payload := `{
+		"ci_ref":{"source":"next-gen","type":"asset_tag","value":"42"},
+		"type":"network_alert",
+		"severity":"warning",
+		"summary":"High packet loss detected",
+		"external_id":"ng-invalid-ref",
+		"observed_at":"2026-05-28T21:00:00Z"
+	}`
+
+	err := RunWithInput([]string{"event", "ingest", "--source", "next-gen", "--stdin"}, configDir, strings.NewReader(payload), &stdout, &stderr)
+	if err == nil {
+		t.Fatal("RunWithInput(event ingest invalid ci_ref) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "unsupported alias type") {
+		t.Fatalf("stderr = %q, want unsupported alias type error", stderr.String())
+	}
+
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadEvents() error = %v, want nil", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events length = %d, want 0 after invalid ci_ref", len(events))
+	}
+}
+
+func TestRunEventIngestRequiresCIIDOrCIRef(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	payload := `{
+		"type":"network_alert",
+		"severity":"warning",
+		"summary":"High packet loss detected",
+		"external_id":"ng-no-ci",
+		"observed_at":"2026-05-28T21:00:00Z"
+	}`
+
+	err := RunWithInput([]string{"event", "ingest", "--source", "next-gen", "--stdin"}, configDir, strings.NewReader(payload), &stdout, &stderr)
+	if err == nil {
+		t.Fatal("RunWithInput(event ingest without ci_id or ci_ref) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "event ingest requires ci_id or ci_ref") {
+		t.Fatalf("stderr = %q, want ci identity error", stderr.String())
+	}
+
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadEvents() error = %v, want nil", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events length = %d, want 0 without ci identity", len(events))
+	}
+}
+
+func TestRunEventIngestCIIDWinsOverInvalidCIRef(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if err := Run([]string{"ci", "add", "--ci-id", "FW-MAIN-001", "--category", "network", "--model", "FortiGate"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	payload := `{
+		"ci_id":"FW-MAIN-001",
+		"ci_ref":{"source":"next-gen","type":"asset_tag","value":"42"},
+		"type":"network_alert",
+		"severity":"warning",
+		"summary":"High packet loss detected",
+		"external_id":"ng-ciid-wins",
+		"observed_at":"2026-05-28T21:00:00Z"
+	}`
+
+	stdout.Reset()
+	stderr.Reset()
+	err := RunWithInput([]string{"event", "ingest", "--source", "next-gen", "--stdin"}, configDir, strings.NewReader(payload), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunWithInput(event ingest ci_id precedence) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadEvents() error = %v, want nil", err)
+	}
+	if len(events) != 1 || events[0].CIID != "FW-MAIN-001" {
+		t.Fatalf("events = %#v, want event stored under ci_id while ignoring ci_ref", events)
+	}
+}
+
 func TestRunEventIngestRequiresExactlyOneInput(t *testing.T) {
 	configDir := t.TempDir()
 	file := writeIngestFile(t, `{"ci_id":"FW-MAIN-001"}`)
