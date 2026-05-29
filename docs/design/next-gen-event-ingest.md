@@ -80,10 +80,12 @@ raven event add RAVEN-DEV-001 \
   --source human
 ```
 
-Normalized ingest from `next-gen` or an AI adapter:
+Normalized ingest from `next-gen` or an AI adapter can read either a JSON file or piped JSON from stdin:
 
 ```bash
 raven event ingest --source next-gen --file alert.json
+
+next-gen-export-alert | raven event ingest --source next-gen --stdin
 ```
 
 Timeline inspection:
@@ -107,13 +109,13 @@ Implemented Raven surfaces:
 1. `Event` domain model.
 2. JSON event storage at `~/.config/raven/events.json`.
 3. CLI commands: `event add`, `event capture`, `event ingest`, and `timeline`.
-4. Deduplication by `dedup_key` for structured ingest.
+4. `event ingest` accepts exactly one input source: `--file <json>` or `--stdin`.
+5. Deduplication by `dedup_key` for structured ingest.
 
 ## Next step
 
 Continue with one of:
 
-1. `event ingest --stdin` for pipe-based adapters.
-2. Alias resolution for IP/hostname/serial/MAC to `ci_id` if `next-gen` cannot provide CI IDs directly.
-3. `raven setup <agent>` automation for Gemini/Ollama/Codex/OpenCode instruction insertion.
-4. SQLite storage once CIs, events, aliases, and ingest contracts stabilize.
+1. Alias resolution for IP/hostname/serial/MAC to `ci_id` if `next-gen` cannot provide CI IDs directly.
+2. `raven setup <agent>` automation for Gemini/Ollama/Codex/OpenCode instruction insertion.
+3. SQLite storage once CIs, events, aliases, and ingest contracts stabilize.

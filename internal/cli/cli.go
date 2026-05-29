@@ -16,6 +16,10 @@ import (
 )
 
 func Run(args []string, configDir string, stdout, stderr io.Writer) error {
+	return RunWithInput(args, configDir, os.Stdin, stdout, stderr)
+}
+
+func RunWithInput(args []string, configDir string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -24,7 +28,7 @@ func Run(args []string, configDir string, stdout, stderr io.Writer) error {
 	case "ci":
 		return runCI(args[1:], configDir, stdout, stderr)
 	case "event":
-		return runEvent(args[1:], configDir, stdout, stderr)
+		return runEvent(args[1:], configDir, stdin, stdout, stderr)
 	case "timeline":
 		return runTimeline(args[1:], configDir, stdout, stderr)
 	default:
@@ -157,7 +161,7 @@ func runCIShow(args []string, configDir string, stdout, stderr io.Writer) error 
 	return nil
 }
 
-func runEvent(args []string, configDir string, stdout, stderr io.Writer) error {
+func runEvent(args []string, configDir string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		err := errors.New("event subcommand is required")
 		fmt.Fprintln(stderr, err)
@@ -170,7 +174,7 @@ func runEvent(args []string, configDir string, stdout, stderr io.Writer) error {
 	case "capture":
 		return runEventCapture(args[1:], configDir, stdout, stderr)
 	case "ingest":
-		return runEventIngest(args[1:], configDir, stdout, stderr)
+		return runEventIngest(args[1:], configDir, stdin, stdout, stderr)
 	default:
 		err := fmt.Errorf("unknown event subcommand %q", args[0])
 		fmt.Fprintln(stderr, err)
@@ -322,11 +326,12 @@ func runEventCapture(args []string, configDir string, stdout, stderr io.Writer) 
 	return nil
 }
 
-func runEventIngest(args []string, configDir string, stdout, stderr io.Writer) error {
+func runEventIngest(args []string, configDir string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("event ingest", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	source := flags.String("source", "", "event source")
 	file := flags.String("file", "", "normalized event JSON file")
+	useStdin := flags.Bool("stdin", false, "read normalized event JSON from stdin")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -335,17 +340,35 @@ func runEventIngest(args []string, configDir string, stdout, stderr io.Writer) e
 		fmt.Fprintln(stderr, err)
 		return err
 	}
-	if strings.TrimSpace(*file) == "" {
-		err := errors.New("event ingest requires --file")
+
+	filePath := strings.TrimSpace(*file)
+	if (filePath == "" && !*useStdin) || (filePath != "" && *useStdin) {
+		err := errors.New("event ingest requires exactly one of --file or --stdin")
 		fmt.Fprintln(stderr, err)
 		return err
 	}
 
-	data, err := os.ReadFile(*file)
-	if err != nil {
-		err = fmt.Errorf("read ingest file: %w", err)
-		fmt.Fprintln(stderr, err)
-		return err
+	var data []byte
+	var err error
+	if *useStdin {
+		if stdin == nil {
+			err := errors.New("event ingest stdin is unavailable")
+			fmt.Fprintln(stderr, err)
+			return err
+		}
+		data, err = io.ReadAll(stdin)
+		if err != nil {
+			err = fmt.Errorf("read ingest stdin: %w", err)
+			fmt.Fprintln(stderr, err)
+			return err
+		}
+	} else {
+		data, err = os.ReadFile(filePath)
+		if err != nil {
+			err = fmt.Errorf("read ingest file: %w", err)
+			fmt.Fprintln(stderr, err)
+			return err
+		}
 	}
 
 	var event domain.Event

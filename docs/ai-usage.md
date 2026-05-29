@@ -94,8 +94,10 @@ You are using Raven as a CMDB/timeline memory layer.
 Before recording an event, identify the CI ID. Do not invent one.
 If you only have freeform diagnostic text, use:
   raven event capture <ci-id> --source <your-agent-name> --type <type> --severity <severity> --text "..."
-If you have normalized event data with a source event ID, write JSON and use:
+If you have normalized event data with a source event ID, use either:
   raven event ingest --source <source> --file <file>
+or pipe JSON directly:
+  producer-command | raven event ingest --source <source> --stdin
 Preserve evidence. Keep summaries short. Use the CI timeline before making historical claims.
 ```
 
@@ -103,11 +105,9 @@ Preserve evidence. Keep summaries short. Use the CI timeline before making histo
 
 - Alias resolution is not implemented yet, so IP/hostname/serial cannot automatically resolve to CI ID.
 - SQLite is not implemented yet; Raven currently stores local JSON files under the user config directory.
-- `event ingest --stdin` is not implemented yet; use `--file` or `event capture`.
 
 ## Next steps
 
-1. Add `docs/agent-setup.md` for where each ecosystem should receive Raven instructions.
-2. Add alias commands for IP/hostname/serial to CI ID.
-3. Add `event ingest --stdin` for pipe-based adapters.
-4. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.
+1. Add alias commands for IP/hostname/serial to CI ID.
+2. Automate agent setup instructions from `docs/agent-setup.md`.
+3. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.

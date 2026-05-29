@@ -424,6 +424,80 @@ func TestRunEventIngestFromFile(t *testing.T) {
 	}
 }
 
+func TestRunEventIngestFromStdin(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if err := Run([]string{"ci", "add", "--ci-id", "FW-MAIN-001", "--category", "network", "--model", "FortiGate"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	payload := `{
+		"ci_id":"FW-MAIN-001",
+		"type":"network_alert",
+		"severity":"warning",
+		"summary":"High packet loss detected on WAN link",
+		"external_id":"ng-stdin-001",
+		"observed_at":"2026-05-28T21:00:00Z"
+	}`
+
+	stdout.Reset()
+	stderr.Reset()
+	err := RunWithInput([]string{"event", "ingest", "--source", "next-gen", "--stdin"}, configDir, strings.NewReader(payload), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunWithInput(event ingest --stdin) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ingested event") {
+		t.Fatalf("stdout = %q, want ingest confirmation", stdout.String())
+	}
+
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadEvents() error = %v, want nil", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Source != "next-gen" || event.DedupKey != "next-gen:ng-stdin-001" || event.Status != "open" {
+		t.Fatalf("event fields = %#v, want source override, recomputed dedup key, and default status", event)
+	}
+}
+
+func TestRunEventIngestRequiresExactlyOneInput(t *testing.T) {
+	configDir := t.TempDir()
+	file := writeIngestFile(t, `{"ci_id":"FW-MAIN-001"}`)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "missing input",
+			args: []string{"event", "ingest", "--source", "next-gen"},
+		},
+		{
+			name: "ambiguous file and stdin",
+			args: []string{"event", "ingest", "--source", "next-gen", "--file", file, "--stdin"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			err := RunWithInput(tt.args, configDir, strings.NewReader(`{}`), &stdout, &stderr)
+			if err == nil {
+				t.Fatal("RunWithInput(event ingest input validation) error = nil, want error")
+			}
+			if !strings.Contains(stderr.String(), "event ingest requires exactly one of --file or --stdin") {
+				t.Fatalf("stderr = %q, want exactly-one input error", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunEventIngestRejectsUnknownCI(t *testing.T) {
 	configDir := t.TempDir()
 	var stdout bytes.Buffer
