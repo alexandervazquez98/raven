@@ -8,10 +8,11 @@ Use the simplest Raven surface that fits the producer:
 
 | Situation | Use |
 | --- | --- |
+| MCP-compatible AI agent | `raven mcp` and the `raven_*` MCP tools |
 | Human or AI has freeform text | `raven event capture <ci-id> --source <agent> --text "..."` |
 | Adapter already has normalized event JSON | `raven event ingest --source <system> --file alert.json` |
 | Need to create the CI first | `raven ci add --ci-id ... --category ... --model ...` |
-| Need prior context | `raven timeline <ci-id>` |
+| Need prior context | `raven timeline <ci-id>` or MCP `raven_get_timeline` |
 
 ## Core rules
 
@@ -22,6 +23,26 @@ Use the simplest Raven surface that fits the producer:
 5. **Capture decisions and diagnostics.** If an AI diagnosis, operational finding, maintenance action, or resolution would help future support, record it.
 6. **Separate summary from evidence.** The summary may be AI-generated, but raw/source evidence should be preserved in details or normalized event fields when available.
 7. **Prefer capture before silence.** If structured ingest is too hard, use `event capture` with clear text.
+
+## MCP tools
+
+Start the stdio MCP server with:
+
+```bash
+raven mcp
+```
+
+Initial tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `raven_resolve_ci_ref` | Resolve `source + type + value` to canonical Raven `ci_id`. |
+| `raven_record_event` | Record an event with either canonical `ci_id` or a `ci_ref` alias object. |
+| `raven_get_timeline` | Read timeline events for a canonical CI. |
+| `raven_list_cis` | List known CIs. |
+| `raven_get_ci` | Read one CI by canonical ID. |
+
+`raven_record_event` follows the same identity rule as CLI ingest: use `ci_id` only when it is already a Raven canonical ID; otherwise pass upstream identifiers as `ci_ref`.
 
 ## Command patterns
 

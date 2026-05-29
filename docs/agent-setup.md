@@ -4,10 +4,60 @@ Raven instructions should be installed where each AI ecosystem actually reads op
 
 ## Quick path
 
-1. Read [`docs/ai-usage.md`](ai-usage.md).
-2. Add the Raven prompt snippet to the target agent's instruction location.
+1. Prefer the MCP server for MCP-compatible agents: `raven mcp`.
+2. Read [`docs/ai-usage.md`](ai-usage.md) for the Raven memory rules.
 3. Make sure the agent can run the `raven` binary from its shell environment.
-4. Test with `raven timeline <ci-id>` and `raven event capture <ci-id> ...`.
+4. Test with `raven timeline <ci-id>` or the MCP `raven_list_cis` tool.
+
+## MCP setup
+
+Raven exposes an agent-facing stdio MCP server:
+
+```bash
+raven mcp
+```
+
+The server provides these tools:
+
+- `raven_resolve_ci_ref`
+- `raven_record_event`
+- `raven_get_timeline`
+- `raven_list_cis`
+- `raven_get_ci`
+
+Use canonical Raven `ci_id` values when already known. If an agent only has an upstream ID, IP, hostname, serial, or MAC address, pass it as a `ci_ref` alias object; upstream IDs are not canonical Raven IDs.
+
+### Gemini CLI
+
+Add Raven to `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "raven": {
+      "command": "raven",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+If `raven` is not on the agent's `PATH`, use the absolute path to the binary in `command`.
+
+### Antigravity
+
+Add Raven to Antigravity's raw MCP config, for example `~/.gemini/antigravity-cli/mcp_config.json` or the equivalent **Manage MCP Servers** raw config UI:
+
+```json
+{
+  "mcpServers": {
+    "raven": {
+      "command": "raven",
+      "args": ["mcp"]
+    }
+  }
+}
+```
 
 ## Instruction insertion points
 

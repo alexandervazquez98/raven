@@ -12,6 +12,8 @@ import (
 
 	"raven/internal/app"
 	"raven/internal/domain"
+	ravenmcp "raven/internal/mcp"
+	"raven/internal/service"
 	"raven/internal/storage"
 )
 
@@ -33,6 +35,8 @@ func RunWithInput(args []string, configDir string, stdin io.Reader, stdout, stde
 		return runEvent(args[1:], configDir, stdin, stdout, stderr)
 	case "timeline":
 		return runTimeline(args[1:], configDir, stdout, stderr)
+	case "mcp":
+		return ravenmcp.ServeStdio(args[1:], configDir, stderr)
 	default:
 		err := fmt.Errorf("unknown command %q", args[0])
 		fmt.Fprintln(stderr, err)
@@ -359,7 +363,7 @@ func runEventAdd(args []string, configDir string, stdout, stderr io.Writer) erro
 
 	now := time.Now().UTC()
 	eventID := fmt.Sprintf("evt-%d", now.UnixNano())
-	dedupKey := buildDedupKey(*source, *externalID, eventID)
+	dedupKey := service.BuildDedupKey(*source, *externalID, eventID)
 	event := domain.Event{
 		ID:         eventID,
 		CIID:       ciID,
@@ -445,7 +449,7 @@ func runEventCapture(args []string, configDir string, stdout, stderr io.Writer) 
 		Summary:    eventSummary,
 		Details:    *text,
 		Source:     *source,
-		DedupKey:   buildDedupKey(*source, "", eventID),
+		DedupKey:   service.BuildDedupKey(*source, "", eventID),
 		ObservedAt: now,
 		IngestedAt: now,
 	}
@@ -509,90 +513,26 @@ func runEventIngest(args []string, configDir string, stdin io.Reader, stdout, st
 		}
 	}
 
-	var payload ingestEventPayload
+	var payload service.RecordEventInput
 	if err := json.Unmarshal(data, &payload); err != nil {
 		err = fmt.Errorf("decode ingest event: %w", err)
 		fmt.Fprintln(stderr, err)
 		return err
 	}
-	event := payload.Event.Normalize()
-	if strings.TrimSpace(*source) != "" {
-		event.Source = strings.TrimSpace(*source)
-	}
-	if event.ID == "" {
-		event.ID = fmt.Sprintf("evt-%d", time.Now().UTC().UnixNano())
-	}
-	if event.Status == "" {
-		event.Status = "open"
-	}
-	if event.ExternalID == "" && event.DedupKey == "" {
-		err := errors.New("event ingest requires external_id or dedup_key")
-		fmt.Fprintln(stderr, err)
-		return err
-	}
-	if event.ExternalID != "" {
-		event.DedupKey = buildDedupKey(event.Source, event.ExternalID, event.ID)
-	}
-	if event.IngestedAt.IsZero() {
-		event.IngestedAt = time.Now().UTC()
-	}
-	if event.CIID == "" {
-		if payload.CIRef == nil {
-			err := errors.New("event ingest requires ci_id or ci_ref")
-			fmt.Fprintln(stderr, err)
-			return err
-		}
-		_, registry, err := loadAliasRegistry(configDir)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return err
-		}
-		ciID, err := registry.Resolve(payload.CIRef.AliasKey())
-		if err != nil {
-			err = fmt.Errorf("resolve ci_ref %s %s %s: %w", payload.CIRef.Source, payload.CIRef.Type, payload.CIRef.Value, err)
-			fmt.Fprintln(stderr, err)
-			return err
-		}
-		event.CIID = ciID
-	}
-
-	_, inventory, err := loadInventory(configDir)
+	payload.SourceOverride = *source
+	event, err := service.New(configDir).RecordEvent(payload)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return err
-	}
-	if _, err := inventory.Get(event.CIID); err != nil {
-		fmt.Fprintln(stderr, err)
-		return err
-	}
-
-	events, err := storage.LoadEvents(app.EventsPath(configDir))
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return err
-	}
-	events = append(events, event)
-	if err := storage.SaveEvents(app.EventsPath(configDir), events); err != nil {
+		if errors.Is(err, service.ErrMissingEventDedup) {
+			err = errors.New("event ingest requires external_id or dedup_key")
+		}
+		if errors.Is(err, service.ErrMissingEventIdentity) {
+			err = errors.New("event ingest requires ci_id or ci_ref")
+		}
 		fmt.Fprintln(stderr, err)
 		return err
 	}
 	fmt.Fprintf(stdout, "ingested event %s for CI %s\n", event.ID, event.CIID)
 	return nil
-}
-
-type ingestEventPayload struct {
-	domain.Event
-	CIRef *ingestCIRef `json:"ci_ref,omitempty"`
-}
-
-type ingestCIRef struct {
-	Source string           `json:"source"`
-	Type   domain.AliasType `json:"type"`
-	Value  string           `json:"value"`
-}
-
-func (r ingestCIRef) AliasKey() domain.AliasKey {
-	return domain.AliasKey{Source: r.Source, Type: r.Type, Value: r.Value}
 }
 
 func runTimeline(args []string, configDir string, stdout, stderr io.Writer) error {
@@ -639,15 +579,6 @@ func firstLine(text string) string {
 		return strings.TrimSpace(text[:index])
 	}
 	return text
-}
-
-func buildDedupKey(source, externalID, eventID string) string {
-	source = strings.TrimSpace(source)
-	externalID = strings.TrimSpace(externalID)
-	if externalID != "" {
-		return source + ":" + externalID
-	}
-	return source + ":" + eventID
 }
 
 func loadInventory(configDir string) ([]domain.Component, *domain.Inventory, error) {
