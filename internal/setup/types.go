@@ -27,6 +27,8 @@ const (
 	ActionManual Action = "manual"
 )
 
+const RavenManagedMarker = "BEGIN RAVEN MANAGED"
+
 type PlanResult struct {
 	Items []PlanItem
 }
@@ -41,6 +43,14 @@ type PlanItem struct {
 	SmokeTestCommand string
 	ManualWarning    string
 	ManagedBlockID   string
+	GeneratedContent string
+}
+
+func (item PlanItem) RollbackID() string {
+	if item.ManagedBlockID != "" {
+		return item.ManagedBlockID
+	}
+	return item.ID
 }
 
 func (item PlanItem) IsWritable() bool {
