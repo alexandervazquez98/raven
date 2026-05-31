@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL="${RAVEN_OLLAMA_MODEL:-raven-support}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+AGENTS_FILE="${REPO_ROOT}/AGENTS.md"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/raven-ollama <ci-id> <prompt...>
+
+Example:
+  scripts/raven-ollama RAVEN-DEV-001 diagnose intermittent packet loss
+
+Environment:
+  RAVEN_OLLAMA_MODEL  Ollama model name to run (default: raven-support)
+USAGE
+}
+
+if [[ $# -lt 2 ]]; then
+  usage >&2
+  exit 2
+fi
+
+ci_id="$1"
+shift
+user_prompt="$*"
+
+timeline=""
+if command -v raven >/dev/null 2>&1; then
+  if timeline_output="$(raven timeline "$ci_id" 2>&1)"; then
+    timeline="$timeline_output"
+  else
+    timeline="Unable to read Raven timeline for ${ci_id}: ${timeline_output}"
+  fi
+else
+  timeline="Raven CLI is not available on PATH."
+fi
+
+if [[ -r "$AGENTS_FILE" ]]; then
+  raven_instructions="$(cat "$AGENTS_FILE")"
+else
+  raven_instructions="Use Raven as the local CMDB/timeline tool. CI ID is mandatory. Do not invent CI IDs."
+fi
+
+prompt=$(cat <<EOF
+Project Raven instructions:
+${raven_instructions}
+
+Runtime wrapper rule:
+- Before diagnosing a known CI, use the timeline context below.
+- If the diagnosis should be preserved, propose a raven event capture command but ask before recording it.
+
+CI ID: ${ci_id}
+
+Raven timeline:
+${timeline}
+
+User request:
+${user_prompt}
+EOF
+)
+
+exec ollama run "$MODEL" "$prompt"

@@ -1,0 +1,11 @@
+{
+  "context": {
+    "fileName": ["AGENTS.md", "GEMINI.md"]
+  },
+  "mcpServers": {
+    "raven": {
+      "command": "go",
+      "args": ["run", "./cmd/raven", "mcp"]
+    }
+  }
+}

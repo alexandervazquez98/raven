@@ -1,0 +1,7 @@
+# Project-local Codex configuration for Raven.
+# Codex only loads project `.codex/config.toml` after the project is trusted.
+# Keep provider definitions in user-level ~/.codex/config.toml; Codex ignores
+# project-local `model_providers` entries.
+
+project_doc_fallback_filenames = ["GEMINI.md", "RAVEN.md"]
+project_doc_max_bytes = 65536

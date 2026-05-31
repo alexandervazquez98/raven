@@ -1,5 +1,12 @@
-# Local Pi runtime state
+# Local Pi/runtime state
 .atl/
 .pi/
 .pi-lens/
+.engram/
 context.md
+
+# Local research handoffs
+research/
+issue*-scout.md
+issue*-worker.md
+mcp-engram-research.md
