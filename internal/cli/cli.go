@@ -13,6 +13,7 @@ import (
 	"raven/internal/app"
 	"raven/internal/domain"
 	ravenmcp "raven/internal/mcp"
+	"raven/internal/nextgenmcp"
 	"raven/internal/service"
 	"raven/internal/storage"
 )
@@ -37,6 +38,8 @@ func RunWithInput(args []string, configDir string, stdin io.Reader, stdout, stde
 		return runTimeline(args[1:], configDir, stdout, stderr)
 	case "mcp":
 		return ravenmcp.ServeStdio(args[1:], configDir, stderr)
+	case "nextgen-mcp":
+		return nextgenmcp.ServeStdio(args[1:], stderr)
 	default:
 		err := fmt.Errorf("unknown command %q", args[0])
 		fmt.Fprintln(stderr, err)

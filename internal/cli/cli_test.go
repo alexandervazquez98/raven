@@ -951,3 +951,17 @@ func writeIngestFile(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestRunNextGenMCPRejectsUnexpectedArguments(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"nextgen-mcp", "extra"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(nextgen-mcp extra) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "nextgen-mcp does not accept arguments: extra") {
+		t.Fatalf("stderr = %q, want nextgen-mcp argument error", stderr.String())
+	}
+}

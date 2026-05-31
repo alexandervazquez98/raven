@@ -9,6 +9,9 @@ Use the simplest Raven surface that fits the producer:
 | Situation | Use |
 | --- | --- |
 | MCP-compatible AI agent | `raven mcp` and the `raven_*` MCP tools |
+| Gemini CLI or Antigravity project setup | Project MCP config plus `GEMINI.md`/`AGENTS.md` Raven instructions |
+| Codex project setup | Repository `AGENTS.md` Raven instructions; optional trusted `.codex/config.toml` for project doc-loading settings |
+| Ollama local model | Project Modelfile `SYSTEM` prompt or wrapper that injects Raven rules; Ollama does not read project `.md` instructions itself |
 | Human or AI has freeform text | `raven event capture <ci-id> --source <agent> --text "..."` |
 | Adapter already has normalized event JSON | `raven event ingest --source <system> --file alert.json` |
 | Need to create the CI first | `raven ci add --ci-id ... --category ... --model ...` |
@@ -147,9 +150,12 @@ Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source 
 
 - Raven does not create unresolved events yet; ingest fails if neither `ci_id` nor a resolvable `ci_ref` identifies the CI.
 - SQLite is not implemented yet; Raven currently stores local JSON files under the user config directory.
+- Ollama is only a local model runtime in this contract. Raven must provide project Modelfiles, wrappers, or client configuration for instruction injection.
+- Project-local setup should not silently edit global AI tool profiles; provider definitions and secrets stay in user-level tool configuration.
 
 ## Next steps
 
 1. Add a dedicated next-gen adapter command or script that emits normalized `ci_ref` event payloads.
-2. Automate agent setup instructions from `docs/agent-setup.md`.
-3. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.
+2. Add project-local setup artifacts for Gemini CLI, Antigravity CLI, Codex, and Ollama from `docs/agent-setup.md`.
+3. Automate project-local agent setup instructions with `raven setup <agent>` once the docs contract stabilizes.
+4. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.
