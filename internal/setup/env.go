@@ -53,10 +53,3 @@ func (OSFileSystem) MkdirAll(path string, perm fs.FileMode) error {
 func (OSFileSystem) Stat(path string) (fs.FileInfo, error) {
 	return os.Stat(path)
 }
-
-func withDefaults(env SetupEnv) SetupEnv {
-	if env.FS == nil {
-		env.FS = OSFileSystem{}
-	}
-	return env
-}
