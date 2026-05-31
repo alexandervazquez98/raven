@@ -12,13 +12,41 @@ import (
 	"raven/internal/version"
 )
 
+type runMode int
+
+const (
+	runModeDashboard runMode = iota
+	runModeVersion
+	runModeCLI
+	runModeSetup
+)
+
+func selectRunMode(args []string) runMode {
+	if len(args) == 0 {
+		return runModeDashboard
+	}
+
+	switch args[0] {
+	case "version", "--version", "-v":
+		return runModeVersion
+	case "setup":
+		return runModeSetup
+	default:
+		return runModeCLI
+	}
+}
+
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "version", "--version", "-v":
-			fmt.Println(version.String())
-			return
-		}
+	args := os.Args[1:]
+	mode := selectRunMode(args)
+
+	switch mode {
+	case runModeVersion:
+		fmt.Println(version.String())
+		return
+	case runModeSetup:
+		fmt.Fprintln(os.Stdout, "raven setup is not implemented yet")
+		return
 	}
 
 	configDir, err := os.UserConfigDir()
@@ -26,8 +54,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "resolve config directory: %v\n", err)
 		os.Exit(1)
 	}
-	if len(os.Args) > 1 {
-		if err := cli.Run(os.Args[1:], configDir, os.Stdout, os.Stderr); err != nil {
+	if mode == runModeCLI {
+		if err := cli.Run(args, configDir, os.Stdout, os.Stderr); err != nil {
 			os.Exit(1)
 		}
 		return
