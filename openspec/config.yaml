@@ -1,0 +1,45 @@
+project:
+  name: raven
+  repository_type: single
+  primary_language: go
+  user_language: es
+  artifact_language: en
+
+sdd:
+  strict_tdd: true
+  execution_mode: auto
+  artifact_store: memory
+  chained_pr_strategy: auto-forecast
+  review_budget_lines: 400
+  target_change:
+    issue: 6
+    slug: feat-setup-tui-installer-raven-ai-integrations
+
+phases:
+  enforce_order:
+    - proposal
+    - spec
+    - design
+    - tasks
+    - apply
+    - verify
+  require_tests_before_implementation: true
+  require_verify_before_done: true
+
+testing:
+  default_runner: go test ./...
+  unit_test_framework: go test
+  conventions:
+    - use_table_driven_tests
+    - use_tempdir_for_filesystem_tests
+    - prefer_model_update_tests_for_tui_state
+
+platform:
+  targets:
+    - windows
+    - linux
+    - darwin
+
+notes:
+  - "Config initialized automatically because openspec/config.yaml was missing."
+  - "Do not write secrets; validate generated files during setup workflows."
