@@ -2,14 +2,52 @@
 
 Raven instructions should be installed where each AI ecosystem actually reads operational rules. This document tracks the intended insertion points for **project-local setup**. The docs are the source of truth for now; automated `raven setup <agent>` commands can come later.
 
-Current scope: project files only. Do not require Raven to modify global user profiles such as `~/.gemini`, `~/.codex`, or Ollama server environment during project setup. Global examples are documented only as operator references.
+Current setup scope is safety-first. `raven setup` can create or update approved project-local files and can show user/global guidance, but it must not silently modify global user profiles such as `~/.gemini`, `~/.codex`, Antigravity profiles, or Ollama server environment. Global writes require explicit separate approval and should remain manual unless Raven has a safe supported target.
 
 ## Quick path
 
-1. Prefer the MCP server for MCP-compatible agents: `raven mcp`.
-2. Read [`docs/ai-usage.md`](ai-usage.md) for the Raven memory rules.
-3. Make sure the agent can run the `raven` binary from its shell environment.
-4. Test with `raven timeline <ci-id>` or the MCP `raven_list_cis` tool.
+1. Load the common agent contracts from `.agents/assistant.yaml`, `.agents/policies/tool-policy.yaml`, `.agents/mcp/raven-local.yaml`, and `.agents/mcp/nextgen.yaml` when the AI ecosystem supports structured project instructions.
+2. Prefer the MCP server for MCP-compatible agents: `raven mcp`.
+3. Read [`docs/ai-usage.md`](ai-usage.md) for the Raven memory rules.
+4. Make sure the agent can run the `raven` binary from its shell environment.
+5. Test with `raven timeline <ci-id>` or the MCP `raven_list_cis` tool.
+
+## `raven setup` wizard
+
+Run the guided setup flow from the repository root:
+
+```bash
+raven setup
+```
+
+For command help without launching the TUI:
+
+```bash
+raven setup --help
+raven setup -h
+raven setup help
+```
+
+The wizard follows this operator contract:
+
+1. **Detect** supported AI tooling and existing Raven setup files.
+2. **Plan** changes before writing anything.
+3. **Separate scopes**: project-local writes are distinct from user/global writes.
+4. **Ask for approval** before applying the plan; user/global writes require a second approval.
+5. **Never write secrets**. Generated files may mention environment variable names such as `NEXTGEN_ACCESS_TOKEN`, but not token values.
+6. **Validate** generated artifacts where practical, including JSON parsing and manual smoke-test commands when external tools are absent.
+7. **Report rollback identifiers**, including file paths and Raven managed block IDs such as `codex-agents` or `raven-incident-skill`.
+
+Useful smoke checks after setup:
+
+```bash
+raven mcp
+raven nextgen-mcp        # should show a clear setup error when env vars are missing
+ollama show raven-support
+bash -n scripts/raven-ollama
+```
+
+If setup adds a Raven managed block, remove the matching `BEGIN RAVEN MANAGED` / `END RAVEN MANAGED` block to roll it back manually. If setup creates a whole generated file such as `.gemini/settings.json` or `ollama/Modelfile.raven`, remove that file only after confirming it has no operator-owned content.
 
 ## MCP setup
 
@@ -27,7 +65,7 @@ The server provides these tools:
 - `raven_list_cis`
 - `raven_get_ci`
 
-Use canonical Raven `ci_id` values when already known. If an agent only has an upstream ID, IP, hostname, serial, or MAC address, pass it as a `ci_ref` alias object; upstream IDs are not canonical Raven IDs.
+Use canonical Raven `ci_id` values when already known. If an agent only has an upstream ID, IP, hostname, serial, or MAC address, pass it as a `ci_ref` alias object; upstream IDs are not canonical Raven IDs. next-gen CI IDs are upstream references, not Raven CI IDs, and must be represented as `source=next-gen type=ci_id value=<nextgen_ci_id>` before resolution through Raven aliases.
 
 Raven also exposes a read-only next-gen MCP server for incident enrichment:
 
@@ -118,8 +156,10 @@ Use this when no ecosystem-specific integration exists yet:
 ```text
 Use Raven as the local CMDB/timeline tool.
 - CI ID is mandatory. Do not invent CI IDs.
+- Raven CI IDs are canonical; next-gen CI IDs are upstream references, not Raven CI IDs.
+- Resolve upstream refs through Raven aliases before CI-specific reasoning.
 - Before diagnosing a known CI, run `raven timeline <ci-id>` when useful.
-- Save important diagnostics, observations, maintenance actions, incidents, and resolutions with `raven event capture`.
+- Save important diagnostics, observations, maintenance actions, incidents, and resolutions with `raven event capture` only after operator approval.
 - Use `raven event ingest --source <source> --file <json>` only when you have normalized event data with `external_id` or `dedup_key`.
 - Prefer `event capture` over losing context when structured JSON is too costly.
 - Preserve source/evidence and keep summaries short.
@@ -170,15 +210,32 @@ base_url = "http://localhost:11434/v1"
 Ollama does not load project markdown instructions by itself. Create a project-local Modelfile that bakes the Raven rules into the model system prompt:
 
 ```text
-FROM qwen2.5-coder:7b
+FROM qwen3.5:4b
 PARAMETER temperature 0.2
 PARAMETER num_ctx 8192
 SYSTEM """
-Use Raven as the local CMDB/timeline tool.
-- CI ID is mandatory. Do not invent CI IDs.
-- Before diagnosing a known CI, run `raven timeline <ci-id>` when useful.
-- Save important diagnostics, observations, maintenance actions, incidents, and resolutions with `raven event capture`.
-- Preserve source/evidence and keep summaries short.
+You are an L1 Incident Assistant for network and endpoint operations.
+
+Raven is not you. Raven is the local MCP/CLI-backed operational memory, CMDB,
+CI alias resolver, timeline, and persistence layer.
+
+next-gen is an upstream operational system accessed through a separate MCP proxy.
+next-gen CI IDs are upstream refs, not Raven CI IDs.
+
+Use tools for operational context. Do not invent context.
+
+Rules:
+- Never invent CI IDs, timeline events, tool results, fixes, or resolutions.
+- Resolve upstream refs through Raven before CI-specific reasoning.
+- Prefer MCP tools; use CLI only as fallback.
+- Use next-gen read-only tools first.
+- Persist approved operational memory only in Raven.
+- Do not persist anything without explicit operator approval.
+- Separate facts, hypotheses, and recommended next checks.
+- Do not mutate production or next-gen unless that future capability is explicitly enabled and approved.
+- Redact secrets and sensitive payloads.
+- Be concise and operational.
+- Respond in the operator's language.
 """
 ```
 
@@ -191,20 +248,56 @@ ollama run raven-support "diagnose FW-MAIN-001"
 
 ### Ollama wrapper
 
-A wrapper can inject the latest Raven instructions without rebuilding an Ollama model. Keep the wrapper project-local and pass the prompt safely:
+A wrapper can inject the latest Raven instructions without rebuilding an Ollama model. Keep the wrapper project-local and pass the prompt safely.
+
+Linux/macOS or WSL shell:
 
 ```bash
 scripts/raven-ollama FW-MAIN-001 diagnose packet loss
 ```
 
-The wrapper should:
+Windows PowerShell:
+
+```powershell
+.\scripts\raven-ollama.ps1 FW-MAIN-001 diagnose packet loss
+```
+
+Windows Command Prompt:
+
+```cmd
+scripts\raven-ollama.cmd FW-MAIN-001 diagnose packet loss
+```
+
+The wrappers should:
 
 1. Read the project Raven instruction block.
 2. Run `raven timeline <ci-id>` when a CI ID is provided.
 3. Call `ollama run <model>` or the Ollama HTTP API with the Raven rules in the prompt/system message.
 4. Ask before recording an event unless the caller explicitly requests capture.
 
+Environment:
+
+| Variable | Purpose |
+| --- | --- |
+| `RAVEN_OLLAMA_MODEL` | Ollama model to run, default `raven-support`. |
+| `OLLAMA_HOST` | Optional Ollama server address honored by the Ollama CLI, for example `http://127.0.0.1:11434`. |
+
 > Avoid piping untrusted model output directly into shell command substitution. Capture model output to a temporary file or variable with proper quoting before calling `raven event capture`.
+
+#### Windows and WSL interoperability
+
+Ollama for Windows serves the API on `localhost:11434` by default and normally binds to `127.0.0.1:11434`. Native Windows wrappers can use that default. Linux/WSL callers are different:
+
+- With WSL mirrored networking on supported Windows 11 builds, WSL can usually reach Windows Ollama through `127.0.0.1:11434`.
+- With default WSL2 NAT networking, WSL should call the Windows host IP instead of assuming WSL `localhost` reaches Windows services.
+- If exposing Ollama beyond loopback is required, set `OLLAMA_HOST` for the Ollama server and restart Ollama, then restrict access with Windows/Hyper-V firewall rules. Ollama's local API is unauthenticated by default, so do not bind it broadly on untrusted networks.
+
+Example WSL NAT client setup:
+
+```bash
+export OLLAMA_HOST="http://$(ip route show default | awk '{print $3}'):11434"
+scripts/raven-ollama FW-MAIN-001 diagnose packet loss
+```
 
 ### next-gen adapter
 
