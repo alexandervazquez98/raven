@@ -3,10 +3,18 @@ package setup
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 )
 
 type CommandDetector interface {
 	LookPath(name string) (string, bool)
+}
+
+type ExecCommandDetector struct{}
+
+func (ExecCommandDetector) LookPath(name string) (string, bool) {
+	path, err := exec.LookPath(name)
+	return path, err == nil
 }
 
 type FileSystem interface {
@@ -44,11 +52,4 @@ func (OSFileSystem) MkdirAll(path string, perm fs.FileMode) error {
 
 func (OSFileSystem) Stat(path string) (fs.FileInfo, error) {
 	return os.Stat(path)
-}
-
-func withDefaults(env SetupEnv) SetupEnv {
-	if env.FS == nil {
-		env.FS = OSFileSystem{}
-	}
-	return env
 }

@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"raven/internal/app"
 	"raven/internal/cli"
+	"raven/internal/setup"
+	"raven/internal/setuptui"
 	"raven/internal/storage"
 	"raven/internal/tui"
 	"raven/internal/version"
@@ -19,6 +22,7 @@ const (
 	runModeVersion
 	runModeCLI
 	runModeSetup
+	runModeSetupHelp
 )
 
 func selectRunMode(args []string) runMode {
@@ -30,6 +34,9 @@ func selectRunMode(args []string) runMode {
 	case "version", "--version", "-v":
 		return runModeVersion
 	case "setup":
+		if len(args) > 1 && (args[1] == "--help" || args[1] == "-h" || args[1] == "help") {
+			return runModeSetupHelp
+		}
 		return runModeSetup
 	default:
 		return runModeCLI
@@ -45,7 +52,13 @@ func main() {
 		fmt.Println(version.String())
 		return
 	case runModeSetup:
-		fmt.Fprintln(os.Stdout, "raven setup is not implemented yet")
+		if err := runSetup(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	case runModeSetupHelp:
+		fmt.Fprint(os.Stdout, setupUsage())
 		return
 	}
 
@@ -72,4 +85,34 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func setupUsage() string {
+	return `Usage: raven setup [--help]
+
+Launch the Raven AI integration setup wizard.
+
+The setup wizard detects supported AI tooling, shows a reviewable plan, asks before writing files, requires separate approval for user-global writes, and validates generated artifacts where practical.
+`
+}
+
+func runSetup() error {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve project directory: %w", err)
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	env := setup.SetupEnv{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+		GOOS:       runtime.GOOS,
+		Commands:   setup.ExecCommandDetector{},
+		FS:         setup.OSFileSystem{},
+	}
+	program := tea.NewProgram(setuptui.NewForEnv(env), tea.WithAltScreen())
+	_, err = program.Run()
+	return err
 }
