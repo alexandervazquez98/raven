@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,36 @@ func TestUpsertManagedBlockReplacesOnlyManagedBlock(t *testing.T) {
 	}
 	if !strings.Contains(updated, "new raven content") {
 		t.Fatalf("new managed content missing\n%s", updated)
+	}
+}
+
+func TestGeneratedSetupContentIsDeterministicParseableAndSecretSafe(t *testing.T) {
+	generators := map[string]func() string{
+		"gemini settings":      GeminiSettingsJSON,
+		"codex agents block":   CodexAgentsBlock,
+		"ollama modelfile":     OllamaModelfile,
+		"raven assistant yaml": RavenAssistantYAML,
+		"raven incident skill": RavenIncidentSkillBlock,
+	}
+
+	for name, generate := range generators {
+		t.Run(name, func(t *testing.T) {
+			first := generate()
+			second := generate()
+			if first != second {
+				t.Fatalf("generated content is not deterministic\nfirst: %s\nsecond: %s", first, second)
+			}
+			if strings.TrimSpace(first) == "" {
+				t.Fatal("generated content is empty")
+			}
+			if err := rejectSecrets(first); err != nil {
+				t.Fatalf("generated content contains a secret: %v\n%s", err, first)
+			}
+		})
+	}
+
+	if gemini := GeminiSettingsJSON(); !json.Valid([]byte(gemini)) {
+		t.Fatalf("GeminiSettingsJSON() is not parseable JSON:\n%s", gemini)
 	}
 }
 

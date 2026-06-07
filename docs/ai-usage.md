@@ -4,7 +4,7 @@ Raven is the CMDB and operational timeline for CIs. AI tools such as Gemini CLI,
 
 ## Quick path
 
-Use the simplest Raven surface that fits the producer:
+Use the simplest Raven surface that fits the producer. The shared operational contracts live under `.agents/`: `assistant.yaml`, `policies/tool-policy.yaml`, `mcp/raven-local.yaml`, `mcp/nextgen.yaml`, and `skills/raven-incident/SKILL.md`.
 
 | Situation | Use |
 | --- | --- |
@@ -16,16 +16,18 @@ Use the simplest Raven surface that fits the producer:
 | Adapter already has normalized event JSON | `raven event ingest --source <system> --file alert.json` |
 | Need to create the CI first | `raven ci add --ci-id ... --category ... --model ...` |
 | Need prior context | `raven timeline <ci-id>` or MCP `raven_get_timeline` |
+| Need to configure local AI integrations | `raven setup` from the repository root, then review/apply the setup plan |
 
 ## Core rules
 
-1. **CI ID is the topic.** Every Raven CI and event is anchored to `ci_id`.
+1. **CI ID is the topic.** Every Raven CI and event is anchored to canonical Raven `ci_id`.
 2. **Do not invent CI IDs.** If the CI is unknown, ask the user or resolve through aliases when that feature exists.
-3. **Categories are flexible.** `hardware`, `logical`, `network`, `power`, `service`, `database`, `firewall`, and other CMDB labels are valid when non-empty.
-4. **Preserve source.** Always set `--source` to the producer, such as `gemini-cli`, `ollama`, `next-gen`, `human`, or a proxy name.
-5. **Capture decisions and diagnostics.** If an AI diagnosis, operational finding, maintenance action, or resolution would help future support, record it.
-6. **Separate summary from evidence.** The summary may be AI-generated, but raw/source evidence should be preserved in details or normalized event fields when available.
-7. **Prefer capture before silence.** If structured ingest is too hard, use `event capture` with clear text.
+3. **next-gen IDs are upstream refs.** next-gen CI IDs are not Raven CI IDs; represent them as `source=next-gen type=ci_id value=<nextgen_ci_id>` and resolve through Raven before CI-specific reasoning.
+4. **Categories are flexible.** `hardware`, `logical`, `network`, `power`, `service`, `database`, `firewall`, and other CMDB labels are valid when non-empty.
+5. **Preserve source.** Always set `--source` to the producer, such as `gemini-cli`, `ollama`, `next-gen`, `human`, or a proxy name.
+6. **Capture decisions and diagnostics with approval.** If an AI diagnosis, operational finding, maintenance action, or resolution would help future support, propose recording it and ask before writing.
+7. **Separate summary from evidence.** The summary may be AI-generated, but raw/source evidence should be preserved in details or normalized event fields when available.
+8. **Prefer capture before silence.** If structured ingest is too hard, use `event capture` with clear text after approval.
 
 ## MCP tools
 
@@ -122,7 +124,7 @@ Agents should inspect the timeline before making repeated or historical claims.
 
 ```text
 You are using Raven as a CMDB/timeline memory layer.
-Before recording an event, identify the CI ID. Do not invent one. If you have an upstream ID or operational identifier, either include it as `ci_ref` in normalized ingest JSON or resolve it through aliases first:
+Before recording an event, identify the canonical Raven CI ID. Do not invent one. next-gen CI IDs are upstream references, not Raven CI IDs. Represent next-gen CI IDs as source=next-gen type=ci_id value=<nextgen_ci_id> and resolve them before CI-specific Raven reasoning. If you have an upstream ID or operational identifier, either include it as `ci_ref` in normalized ingest JSON or resolve it through aliases first:
   raven alias resolve --source <source> --type <ci_id|ip|hostname|serial|mac> --value <value>
 If you only have freeform diagnostic text, use:
   raven event capture <ci-id> --source <your-agent-name> --type <type> --severity <severity> --text "..."
@@ -151,11 +153,13 @@ Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source 
 - Raven does not create unresolved events yet; ingest fails if neither `ci_id` nor a resolvable `ci_ref` identifies the CI.
 - SQLite is not implemented yet; Raven currently stores local JSON files under the user config directory.
 - Ollama is only a local model runtime in this contract. Raven must provide project Modelfiles, wrappers, or client configuration for instruction injection.
-- Project-local setup should not silently edit global AI tool profiles; provider definitions and secrets stay in user-level tool configuration.
+- Windows Ollama can be used from native PowerShell/CMD wrappers; WSL/Linux clients may need `OLLAMA_HOST` pointed at the Windows host IP unless WSL mirrored networking makes `127.0.0.1:11434` work.
+- `raven setup` is available for guided AI integration setup, but the TUI is intentionally safety-first and minimal.
+- Project-local setup should not silently edit global AI tool profiles; provider definitions and secrets stay in user-level tool configuration unless the operator explicitly approves a supported user-global write.
 
 ## Next steps
 
 1. Add a dedicated next-gen adapter command or script that emits normalized `ci_ref` event payloads.
-2. Add project-local setup artifacts for Gemini CLI, Antigravity CLI, Codex, and Ollama from `docs/agent-setup.md`.
-3. Automate project-local agent setup instructions with `raven setup <agent>` once the docs contract stabilizes.
+2. Polish ecosystem-specific setup templates as Gemini CLI, Antigravity CLI, Codex, and Ollama config formats evolve.
+3. Add non-interactive `raven setup plan/apply/validate` subcommands if operators need scripted setup.
 4. Migrate storage to SQLite after CIs, events, aliases, and ingest contracts stabilize.

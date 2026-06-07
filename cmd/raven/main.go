@@ -22,6 +22,7 @@ const (
 	runModeVersion
 	runModeCLI
 	runModeSetup
+	runModeSetupHelp
 )
 
 func selectRunMode(args []string) runMode {
@@ -33,6 +34,9 @@ func selectRunMode(args []string) runMode {
 	case "version", "--version", "-v":
 		return runModeVersion
 	case "setup":
+		if len(args) > 1 && (args[1] == "--help" || args[1] == "-h" || args[1] == "help") {
+			return runModeSetupHelp
+		}
 		return runModeSetup
 	default:
 		return runModeCLI
@@ -52,6 +56,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		return
+	case runModeSetupHelp:
+		fmt.Fprint(os.Stdout, setupUsage())
 		return
 	}
 
@@ -78,6 +85,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func setupUsage() string {
+	return `Usage: raven setup [--help]
+
+Launch the Raven AI integration setup wizard.
+
+The setup wizard detects supported AI tooling, shows a reviewable plan, asks before writing files, requires separate approval for user-global writes, and validates generated artifacts where practical.
+`
 }
 
 func runSetup() error {

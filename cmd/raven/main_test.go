@@ -10,6 +10,9 @@ func TestSelectRunMode(t *testing.T) {
 	}{
 		{name: "no args opens dashboard", args: nil, want: runModeDashboard},
 		{name: "setup selects setup flow", args: []string{"setup"}, want: runModeSetup},
+		{name: "setup help selects setup help", args: []string{"setup", "--help"}, want: runModeSetupHelp},
+		{name: "setup short help selects setup help", args: []string{"setup", "-h"}, want: runModeSetupHelp},
+		{name: "setup help subcommand selects setup help", args: []string{"setup", "help"}, want: runModeSetupHelp},
 		{name: "version subcommand stays version", args: []string{"version"}, want: runModeVersion},
 		{name: "long version flag stays version", args: []string{"--version"}, want: runModeVersion},
 		{name: "short version flag stays version", args: []string{"-v"}, want: runModeVersion},
