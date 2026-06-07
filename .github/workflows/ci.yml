@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go tests and vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck on tracked shell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t scripts < <(
+            git ls-files | while IFS= read -r path; do
+              [[ -f "$path" ]] || continue
+              first_line=$(head -n 1 "$path" || true)
+              if [[ "$path" == *.sh ]] || grep -Eq '^#!.*\b(bash|sh|dash|ksh)\b' <<<"$first_line"; then
+                printf '%s\n' "$path"
+              fi
+            done
+          )
+
+          if [[ ${#scripts[@]} -eq 0 ]]; then
+            echo "No tracked shell scripts found."
+            exit 0
+          fi
+
+          printf 'Running ShellCheck on:\n'
+          printf ' - %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"

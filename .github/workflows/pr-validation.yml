@@ -1,0 +1,76 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  policy:
+    name: Repository PR policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          body=$(python3 -c 'import json, os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"])).get("pull_request", {}).get("body") or "")')
+          head_branch=$(python3 -c 'import json, os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"]))["pull_request"]["head"]["ref"])')
+          base_branch=$(python3 -c 'import json, os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"]))["pull_request"]["base"]["ref"])')
+
+          echo "Validating PR from '${head_branch}' into '${base_branch}'."
+
+          if [[ ! "$head_branch" =~ ^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)/[a-z0-9._-]+$ ]]; then
+            fail "Head branch '${head_branch}' must match ^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)/[a-z0-9._-]+$"
+          fi
+          echo "Branch name is valid."
+
+          type_label_count=$(python3 -c 'import json, os; labels=json.load(open(os.environ["GITHUB_EVENT_PATH"]))["pull_request"].get("labels", []); print(sum(1 for label in labels if label.get("name", "").startswith("type:")))')
+          if [[ "$type_label_count" -ne 1 ]]; then
+            fail "PR must have exactly one 'type:*' label; found ${type_label_count}."
+          fi
+          echo "Exactly one type:* label is present."
+
+          if [[ "$base_branch" != "main" ]]; then
+            if ! grep -qi 'Chain Context' <<<"$body"; then
+              fail "PRs targeting non-main base branch '${base_branch}' must include a 'Chain Context' section in the body."
+            fi
+            echo "Non-main base is allowed because Chain Context is present."
+          fi
+
+          issue_ref=$(grep -Eio '\b(Closes|Fixes|Resolves)[[:space:]]+#[0-9]+' <<<"$body" | head -n 1 || true)
+          if [[ -z "$issue_ref" ]]; then
+            fail "PR body must contain an issue reference like 'Closes #12', 'Fixes #12', or 'Resolves #12'."
+          fi
+
+          issue_number=$(grep -Eo '[0-9]+' <<<"$issue_ref" | head -n 1)
+          if [[ -z "$issue_number" ]]; then
+            fail "Unable to parse issue number from reference '${issue_ref}'."
+          fi
+          echo "Found linked issue #${issue_number}."
+
+          if ! gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --jq '.labels[].name' | grep -Fxq 'status:approved'; then
+            fail "Linked issue #${issue_number} must have label 'status:approved' before this PR can merge."
+          fi
+          echo "Linked issue #${issue_number} has status:approved."
+
+          echo "PR policy validation passed."
