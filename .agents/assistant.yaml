@@ -1,0 +1,10 @@
+# BEGIN RAVEN MANAGED: raven-agent-contract
+name: raven-incident-assistant
+role: local-cmdb-and-operational-timeline
+rules:
+  - CI ID is mandatory; do not invent CI IDs.
+  - Resolve upstream references through Raven aliases before CI-specific reasoning.
+  - Prefer Raven MCP tools; use CLI commands as fallback.
+  - Never write secrets or access tokens into project files.
+  - Capture operational events only after operator approval.
+# END RAVEN MANAGED: raven-agent-contract
