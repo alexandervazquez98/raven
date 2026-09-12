@@ -15,6 +15,7 @@ func Plan(env SetupEnv) (PlanResult, error) {
 		completeFileItem(env, "ollama-modelfile", EcosystemOllama, platformJoin(env.GOOS, env.ProjectDir, "ollama", "Modelfile.raven"), "managed-file-present", smokeIfPresent(env, "ollama", "ollama show raven-support"), OllamaModelfile()),
 		completeFileItem(env, "gemini-settings", EcosystemGeminiCLI, platformJoin(env.GOOS, env.ProjectDir, ".gemini", "settings.json"), "json-parse", smokeIfPresent(env, "gemini", "gemini --version"), GeminiSettingsJSON()),
 		managedBlockItem(env, "codex-agents", EcosystemCodex, platformJoin(env.GOOS, env.ProjectDir, "AGENTS.md"), "managed-block-present", smokeIfPresent(env, "codex", "codex --version"), "codex-agents", CodexAgentsBlock()),
+		managedBlockItem(env, "raven-local-ai-guidance", EcosystemRavenAgents, platformJoin(env.GOOS, env.ProjectDir, "AGENTS.md"), "managed-block-present", "", "raven-local-ai-guidance", RavenLocalAIGuidance()),
 		{
 			ID:             "codex-global-guidance",
 			Ecosystem:      EcosystemCodex,
@@ -67,7 +68,7 @@ func managedBlockItem(env SetupEnv, id string, ecosystem Ecosystem, targetPath, 
 		Ecosystem:        ecosystem,
 		TargetPath:       targetPath,
 		Scope:            ScopeProjectLocal,
-		Action:           plannedManagedBlockAction(env.FS, targetPath, blockID),
+		Action:           plannedManagedBlockAction(env.FS, targetPath, blockID, generated),
 		ValidationMethod: validation,
 		SmokeTestCommand: smokeCommand,
 		ManagedBlockID:   blockID,
@@ -83,13 +84,16 @@ func plannedCompleteFileAction(files FileSystem, targetPath, generated string) A
 	if err != nil {
 		return ActionManual
 	}
-	if string(content) == generated || strings.Contains(string(content), RavenManagedMarker) {
+	if string(content) == generated {
 		return ActionSkip
+	}
+	if strings.Contains(string(content), RavenManagedMarker) {
+		return ActionUpdate
 	}
 	return ActionManual
 }
 
-func plannedManagedBlockAction(files FileSystem, targetPath, blockID string) Action {
+func plannedManagedBlockAction(files FileSystem, targetPath, blockID, generated string) Action {
 	content, err := readExistingFile(files, targetPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return ActionCreate
@@ -97,7 +101,18 @@ func plannedManagedBlockAction(files FileSystem, targetPath, blockID string) Act
 	if err != nil {
 		return ActionManual
 	}
-	if strings.Contains(string(content), managedBlockBegin(blockID)) {
+	existing := string(content)
+	begin := managedBlockBegin(blockID)
+	end := managedBlockEnd(blockID)
+	beginCount := strings.Count(existing, begin)
+	endCount := strings.Count(existing, end)
+	if beginCount != endCount || beginCount > 1 {
+		return ActionManual
+	}
+	if beginCount == 1 && strings.Index(existing, end) < strings.Index(existing, begin) {
+		return ActionManual
+	}
+	if managedBlockContentMatches(existing, blockID, generated) {
 		return ActionSkip
 	}
 	return ActionUpdate

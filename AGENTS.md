@@ -33,3 +33,22 @@ Use these `--source` values when recording events:
 
 - Run `go test ./...` after changing Go code.
 - For setup/config-only changes, validate JSON/TOML/shell syntax where possible.
+
+<!-- BEGIN RAVEN MANAGED: codex-agents -->
+Use Raven as the local CMDB and operational timeline.
+- CI ID is mandatory. Do not invent CI IDs.
+- Raven CI IDs are canonical; next-gen CI IDs are upstream references and must be resolved through Raven aliases first.
+- Before diagnosing a known CI, inspect prior context with `raven timeline <ci-id>` when useful.
+- Prefer `raven mcp`; use Raven CLI commands only as fallback.
+- Never write secrets or access tokens into project files.
+- Capture important diagnostics or resolutions in Raven only after operator approval.
+<!-- END RAVEN MANAGED: codex-agents -->
+
+<!-- BEGIN RAVEN MANAGED: raven-local-ai-guidance -->
+This setup slice focuses on project-local AI guidance only.
+- Raven MCP is the shared operational surface; configure `raven mcp` and MCP clients from the project.
+- For Gemini CLI, setup `AGENTS.md` plus project `.gemini/settings.json` MCP settings.
+- For Ollama, setup writes local `ollama/Modelfile.raven` and optional wrapper scripts.
+- For Codex and other tools, keep provider-level runtime settings in user-global profiles; this wizard only writes repository-local guidance.
+- After plan/apply, run the local smoke checks shown in the validation summary.
+<!-- END RAVEN MANAGED: raven-local-ai-guidance -->

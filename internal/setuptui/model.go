@@ -123,7 +123,11 @@ func (m Model) View() string {
 	case StatePlanReview:
 		fmt.Fprintf(&b, "Plan Review: %d item(s)\n", len(m.plan.Items))
 		for _, item := range m.plan.Items {
-			fmt.Fprintf(&b, "- %s [%s/%s]\n", item.ID, item.Scope, item.Action)
+			fmt.Fprintf(&b, "- %s [%s/%s]", item.ID, item.Scope, item.Action)
+			if reason := planItemReason(item); reason != "" {
+				fmt.Fprintf(&b, ": %s", reason)
+			}
+			b.WriteString("\n")
 		}
 	case StateGlobalApproval:
 		b.WriteString("User-global writes require separate approval. Press y to approve, n/enter to skip.\n")
@@ -181,6 +185,23 @@ func (m Model) hasUserGlobalWrites() bool {
 	return false
 }
 
+func planItemReason(item setup.PlanItem) string {
+	switch item.Action {
+	case setup.ActionSkip:
+		return "already configured"
+	case setup.ActionManual:
+		if item.ManualWarning != "" {
+			return item.ManualWarning
+		}
+		if item.TargetPath != "" && item.GeneratedContent != "" {
+			return "existing file differs; review manually"
+		}
+		return "manual guidance; review manually"
+	default:
+		return ""
+	}
+}
+
 func writeSummary(b *strings.Builder, summary setup.ApplySummary, validation []setup.ValidationResult) {
 	for _, section := range []struct {
 		name  string
@@ -191,15 +212,34 @@ func writeSummary(b *strings.Builder, summary setup.ApplySummary, validation []s
 		b.WriteString(section.name + "\n")
 		writeApplyItems(b, section.items)
 	}
-	b.WriteString("Manual\n")
-	count := 0
+	b.WriteString("Validation failed\n")
+	failedCount := 0
 	for _, result := range validation {
-		if result.Status == setup.ValidationManual {
-			count++
-			fmt.Fprintf(b, "- %s: %s\n", result.ItemID, result.SmokeTestCommand)
+		if result.Status == setup.ValidationFailed {
+			failedCount++
+			fmt.Fprintf(b, "- %s", result.ItemID)
+			if result.Message != "" {
+				fmt.Fprintf(b, ": %s", result.Message)
+			}
+			b.WriteString("\n")
 		}
 	}
-	if count == 0 {
+	if failedCount == 0 {
+		b.WriteString("- none\n")
+	}
+	b.WriteString("Manual\n")
+	manualCount := 0
+	for _, result := range validation {
+		if result.Status == setup.ValidationManual {
+			manualCount++
+			detail := result.SmokeTestCommand
+			if detail == "" {
+				detail = result.Message
+			}
+			fmt.Fprintf(b, "- %s: %s\n", result.ItemID, detail)
+		}
+	}
+	if manualCount == 0 {
 		b.WriteString("- none\n")
 	}
 }

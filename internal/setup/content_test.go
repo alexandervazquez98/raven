@@ -58,11 +58,12 @@ func TestUpsertManagedBlockReplacesOnlyManagedBlock(t *testing.T) {
 
 func TestGeneratedSetupContentIsDeterministicParseableAndSecretSafe(t *testing.T) {
 	generators := map[string]func() string{
-		"gemini settings":      GeminiSettingsJSON,
-		"codex agents block":   CodexAgentsBlock,
-		"ollama modelfile":     OllamaModelfile,
-		"raven assistant yaml": RavenAssistantYAML,
-		"raven incident skill": RavenIncidentSkillBlock,
+		"gemini settings":         GeminiSettingsJSON,
+		"codex agents block":      CodexAgentsBlock,
+		"raven local ai guidance": RavenLocalAIGuidance,
+		"ollama modelfile":        OllamaModelfile,
+		"raven assistant yaml":    RavenAssistantYAML,
+		"raven incident skill":    RavenIncidentSkillBlock,
 	}
 
 	for name, generate := range generators {

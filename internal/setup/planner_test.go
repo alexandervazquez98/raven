@@ -55,6 +55,9 @@ func TestPlanIncludesTargetedEcosystemsAndMetadataWithoutMutation(t *testing.T) 
 			t.Fatalf("plan missing ecosystem %q; items: %#v", ecosystem, plan.Items)
 		}
 	}
+	if _, ok := findItem(plan, "raven-local-ai-guidance"); !ok {
+		t.Fatalf("plan missing item raven-local-ai-guidance")
+	}
 
 	for _, item := range plan.Items {
 		if item.Ecosystem == "" {
@@ -101,9 +104,10 @@ func TestPlanActionsReflectExistingFiles(t *testing.T) {
 		id   string
 		want Action
 	}{
-		{id: "ollama-modelfile", want: ActionSkip},
+		{id: "ollama-modelfile", want: ActionUpdate},
 		{id: "gemini-settings", want: ActionManual},
 		{id: "codex-agents", want: ActionCreate},
+		{id: "raven-local-ai-guidance", want: ActionCreate},
 		{id: "antigravity-guidance", want: ActionManual},
 	}
 
@@ -115,6 +119,43 @@ func TestPlanActionsReflectExistingFiles(t *testing.T) {
 			}
 			if item.Action != tt.want {
 				t.Fatalf("item %q action = %q, want %q", tt.id, item.Action, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlanManagedBlockActionsReflectCurrentStaleAndMalformedBlocks(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    Action
+	}{
+		{name: "current", content: renderManagedBlock("raven-local-ai-guidance", RavenLocalAIGuidance()), want: ActionSkip},
+		{name: "stale", content: renderManagedBlock("raven-local-ai-guidance", "stale guidance\n"), want: ActionUpdate},
+		{name: "missing block in existing file", content: "# Raven\n", want: ActionUpdate},
+		{name: "begin without end", content: managedBlockBegin("raven-local-ai-guidance") + "\n", want: ActionManual},
+		{name: "duplicate blocks", content: renderManagedBlock("raven-local-ai-guidance", "one") + "\n" + renderManagedBlock("raven-local-ai-guidance", "two"), want: ActionManual},
+		{name: "current block plus duplicate", content: renderManagedBlock("raven-local-ai-guidance", RavenLocalAIGuidance()) + "\n" + renderManagedBlock("raven-local-ai-guidance", "duplicate"), want: ActionManual},
+		{name: "end before begin", content: managedBlockEnd("raven-local-ai-guidance") + "\n" + managedBlockBegin("raven-local-ai-guidance") + "\n", want: ActionManual},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			homeDir := t.TempDir()
+			writeFile(t, filepath.Join(projectDir, "AGENTS.md"), tt.content)
+
+			plan, err := Plan(SetupEnv{ProjectDir: projectDir, HomeDir: homeDir, GOOS: "linux", Commands: fakeCommands{}, FS: OSFileSystem{}})
+			if err != nil {
+				t.Fatalf("Plan() error = %v", err)
+			}
+
+			item, ok := findItem(plan, "raven-local-ai-guidance")
+			if !ok {
+				t.Fatal("plan item raven-local-ai-guidance not found")
+			}
+			if item.Action != tt.want {
+				t.Fatalf("action = %q, want %q", item.Action, tt.want)
 			}
 		})
 	}
@@ -140,6 +181,7 @@ func TestPlanIncludesGeneratedContentAndManagedIdentifiers(t *testing.T) {
 	}{
 		{id: "gemini-settings", wantGenerated: true, wantValidation: "json-parse", wantScope: ScopeProjectLocal},
 		{id: "codex-agents", wantGenerated: true, wantManagedID: "codex-agents", wantValidation: "managed-block-present", wantScope: ScopeProjectLocal},
+		{id: "raven-local-ai-guidance", wantGenerated: true, wantManagedID: "raven-local-ai-guidance", wantValidation: "managed-block-present", wantScope: ScopeProjectLocal},
 		{id: "ollama-modelfile", wantGenerated: true, wantValidation: "managed-file-present", wantScope: ScopeProjectLocal},
 		{id: "raven-agent-contract", wantGenerated: true, wantValidation: "managed-file-present", wantScope: ScopeProjectLocal},
 		{id: "raven-incident-skill", wantGenerated: true, wantManagedID: "raven-incident-skill", wantValidation: "managed-block-present", wantScope: ScopeProjectLocal},
@@ -177,16 +219,17 @@ func TestPlanIncludesGeneratedContentAndManagedIdentifiers(t *testing.T) {
 
 func TestPlanUsesInjectedPlatformPaths(t *testing.T) {
 	tests := []struct {
-		name           string
-		goos           string
-		projectDir     string
-		homeDir        string
-		wantGeminiPath string
-		wantCodexPath  string
+		name             string
+		goos             string
+		projectDir       string
+		homeDir          string
+		wantGeminiPath   string
+		wantCodexPath    string
+		wantGuidancePath string
 	}{
-		{name: "linux", goos: "linux", projectDir: "/work/raven", homeDir: "/home/operator", wantGeminiPath: "/work/raven/.gemini/settings.json", wantCodexPath: "/home/operator/.codex/config.toml"},
-		{name: "darwin", goos: "darwin", projectDir: "/Users/operator/raven", homeDir: "/Users/operator", wantGeminiPath: "/Users/operator/raven/.gemini/settings.json", wantCodexPath: "/Users/operator/.codex/config.toml"},
-		{name: "windows", goos: "windows", projectDir: `C:\repo\raven`, homeDir: `C:\Users\operator`, wantGeminiPath: `C:\repo\raven\.gemini\settings.json`, wantCodexPath: `C:\Users\operator\.codex\config.toml`},
+		{name: "linux", goos: "linux", projectDir: "/work/raven", homeDir: "/home/operator", wantGeminiPath: "/work/raven/.gemini/settings.json", wantCodexPath: "/home/operator/.codex/config.toml", wantGuidancePath: "/work/raven/AGENTS.md"},
+		{name: "darwin", goos: "darwin", projectDir: "/Users/operator/raven", homeDir: "/Users/operator", wantGeminiPath: "/Users/operator/raven/.gemini/settings.json", wantCodexPath: "/Users/operator/.codex/config.toml", wantGuidancePath: "/Users/operator/raven/AGENTS.md"},
+		{name: "windows", goos: "windows", projectDir: `C:\repo\raven`, homeDir: `C:\Users\operator`, wantGeminiPath: `C:\repo\raven\.gemini\settings.json`, wantCodexPath: `C:\Users\operator\.codex\config.toml`, wantGuidancePath: `C:\repo\raven\AGENTS.md`},
 	}
 
 	for _, tt := range tests {
@@ -208,6 +251,13 @@ func TestPlanUsesInjectedPlatformPaths(t *testing.T) {
 			}
 			if codex.TargetPath != tt.wantCodexPath {
 				t.Fatalf("codex path = %q, want %q", codex.TargetPath, tt.wantCodexPath)
+			}
+			ravenSetupGuidance, ok := findItem(plan, "raven-local-ai-guidance")
+			if !ok {
+				t.Fatal("raven-local-ai-guidance not found")
+			}
+			if ravenSetupGuidance.TargetPath != tt.wantGuidancePath {
+				t.Fatalf("raven ai guidance path = %q, want %q", ravenSetupGuidance.TargetPath, tt.wantGuidancePath)
 			}
 		})
 	}
