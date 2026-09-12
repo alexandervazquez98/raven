@@ -31,7 +31,7 @@ func Apply(plan PlanResult, approval ApplyApproval, env SetupEnv) ApplySummary {
 	for _, item := range plan.Items {
 		result := ApplyItemResult{ItemID: item.ID, TargetPath: item.TargetPath, RollbackID: item.RollbackID()}
 		if !item.IsWritable() {
-			result.Reason = "item is manual or skipped"
+			result.Reason = skipReason(item)
 			summary.Skipped = append(summary.Skipped, result)
 			continue
 		}
@@ -59,6 +59,23 @@ func Apply(plan PlanResult, approval ApplyApproval, env SetupEnv) ApplySummary {
 		summary.Applied = append(summary.Applied, result)
 	}
 	return summary
+}
+
+func skipReason(item PlanItem) string {
+	switch item.Action {
+	case ActionSkip:
+		return "already configured"
+	case ActionManual:
+		if item.ManualWarning != "" {
+			return item.ManualWarning
+		}
+		if item.TargetPath != "" && item.GeneratedContent != "" {
+			return "existing file differs; review manually"
+		}
+		return "manual guidance; review manually"
+	default:
+		return "item is not writable by setup"
+	}
 }
 
 func applyItem(item PlanItem, env SetupEnv) error {

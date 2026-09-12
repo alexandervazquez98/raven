@@ -150,6 +150,7 @@ Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source 
 
 ## Current limitations
 
+- Issue #15 first setup slice is project-local only: `raven setup` now surfaces local AI integration guidance (AGENTS and project files) and keeps runtime/user-global tool-profile setup manual or explicitly approved.
 - Raven does not create unresolved events yet; ingest fails if neither `ci_id` nor a resolvable `ci_ref` identifies the CI.
 - SQLite is not implemented yet; Raven currently stores local JSON files under the user config directory.
 - Ollama is only a local model runtime in this contract. Raven must provide project Modelfiles, wrappers, or client configuration for instruction injection.

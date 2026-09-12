@@ -35,6 +35,18 @@ func CodexAgentsBlock() string {
 	}, "\n")
 }
 
+func RavenLocalAIGuidance() string {
+	return strings.Join([]string{
+		"This setup slice focuses on project-local AI guidance only.",
+		"- Raven MCP is the shared operational surface; configure `raven mcp` and MCP clients from the project.",
+		"- For Gemini CLI, setup `AGENTS.md` plus project `.gemini/settings.json` MCP settings.",
+		"- For Ollama, setup writes local `ollama/Modelfile.raven` and optional wrapper scripts.",
+		"- For Codex and other tools, keep provider-level runtime settings in user-global profiles; this wizard only writes repository-local guidance.",
+		"- After plan/apply, run the local smoke checks shown in the validation summary.",
+		"",
+	}, "\n")
+}
+
 func OllamaModelfile() string {
 	return strings.Join([]string{
 		"# BEGIN RAVEN MANAGED: ollama-modelfile",
@@ -106,6 +118,18 @@ func UpsertManagedBlock(existing, blockID, generated string) (string, error) {
 	}
 	endAt += len(end)
 	return existing[:beginAt] + block + existing[endAt:], nil
+}
+
+func managedBlockContentMatches(existing, blockID, generated string) bool {
+	begin := managedBlockBegin(blockID)
+	end := managedBlockEnd(blockID)
+	beginAt := strings.Index(existing, begin)
+	endAt := strings.Index(existing, end)
+	if beginAt < 0 || endAt < 0 || endAt < beginAt {
+		return false
+	}
+	endAt += len(end)
+	return existing[beginAt:endAt] == renderManagedBlock(blockID, generated)
 }
 
 func renderManagedBlock(blockID, generated string) string {

@@ -128,7 +128,11 @@ func TestGlobalApprovalDeclineStillAppliesWithGlobalWritesSkipped(t *testing.T) 
 
 func TestApplyAndValidationTransitionsToSummary(t *testing.T) {
 	services := Services{Validate: func(items []setup.PlanItem) []setup.ValidationResult {
-		return []setup.ValidationResult{{ItemID: "manual", Status: setup.ValidationManual, SmokeTestCommand: "ollama show raven-support"}}
+		return []setup.ValidationResult{
+			{ItemID: "broken", Status: setup.ValidationFailed, Message: "managed block is missing"},
+			{ItemID: "manual", Status: setup.ValidationManual, SmokeTestCommand: "ollama show raven-support"},
+			{ItemID: "manual-review", Status: setup.ValidationManual, Message: "existing file differs; review manually"},
+		}
 	}}
 	model := New(services)
 	model, _ = updateAsModel(t, model, DetectionCompleteMsg{Plan: setup.PlanResult{Items: []setup.PlanItem{{ID: "manual", Ecosystem: setup.EcosystemOllama, Scope: setup.ScopeManual, Action: setup.ActionManual}}}})
@@ -152,7 +156,28 @@ func TestApplyAndValidationTransitionsToSummary(t *testing.T) {
 		t.Fatalf("State() = %q, want %q", model.State(), StateValidationSummary)
 	}
 	view := model.View()
-	for _, want := range []string{"Applied", "Skipped", "Failed", "Manual", "applied", "skipped", "failed", "ollama show raven-support"} {
+	for _, want := range []string{"Applied", "Skipped", "Failed", "Validation failed", "Manual", "applied", "skipped", "failed", "broken", "managed block is missing", "ollama show raven-support", "manual-review", "existing file differs; review manually"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("View() missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestPlanReviewShowsManualAndSkipReasons(t *testing.T) {
+	model := New(Services{})
+	model, _ = updateAsModel(t, model, DetectionCompleteMsg{Plan: setup.PlanResult{Items: []setup.PlanItem{
+		{ID: "manual-guidance", Ecosystem: setup.EcosystemAntigravity, Scope: setup.ScopeManual, Action: setup.ActionManual, ManualWarning: "Guidance-only item"},
+		{ID: "existing", Ecosystem: setup.EcosystemOllama, Scope: setup.ScopeProjectLocal, Action: setup.ActionManual, GeneratedContent: "generated", TargetPath: "ollama/Modelfile.raven"},
+		{ID: "already", Ecosystem: setup.EcosystemRavenAgents, Scope: setup.ScopeProjectLocal, Action: setup.ActionSkip, TargetPath: "AGENTS.md"},
+	}}})
+
+	view := model.View()
+	for _, want := range []string{
+		"Plan Review: 3 item(s)",
+		"manual-guidance [manual/manual]: Guidance-only item",
+		"existing [project-local/manual]: existing file differs",
+		"already [project-local/skip]: already configured",
+	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("View() missing %q:\n%s", want, view)
 		}

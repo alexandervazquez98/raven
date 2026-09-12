@@ -73,3 +73,10 @@ Next: <single next action>
 ## References
 
 - `../../../docs/design/raven-incident-workflow.md` — full workflow, examples, and open questions.
+
+<!-- BEGIN RAVEN MANAGED: raven-incident-skill -->
+Raven setup installs this managed reminder for incident workflows:
+- Use canonical Raven CI IDs only.
+- Treat next-gen IDs as upstream aliases, not Raven identity.
+- Preserve evidence and ask before recording events.
+<!-- END RAVEN MANAGED: raven-incident-skill -->

@@ -2,7 +2,7 @@
 
 Raven instructions should be installed where each AI ecosystem actually reads operational rules. This document tracks the intended insertion points for **project-local setup**. The docs are the source of truth for now; automated `raven setup <agent>` commands can come later.
 
-Current setup scope is safety-first. `raven setup` can create or update approved project-local files and can show user/global guidance, but it must not silently modify global user profiles such as `~/.gemini`, `~/.codex`, Antigravity profiles, or Ollama server environment. Global writes require explicit separate approval and should remain manual unless Raven has a safe supported target.
+Issue #15 defines the first setup slice as a **project-local first pass**. `raven setup` will now clearly show and apply local AI-integration guidance in-repo, while runtime/global-provider configuration remains manual for now. It can also show user/global guidance, but it does not silently edit runtime-specific global profiles. Global writes require explicit separate approval and should remain manual unless Raven has a safe supported target.
 
 ## Quick path
 

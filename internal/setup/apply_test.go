@@ -70,7 +70,7 @@ func TestApplyNeverWritesManualOrSkipItems(t *testing.T) {
 	manualPath := filepath.Join(projectDir, "manual.txt")
 	skipPath := filepath.Join(projectDir, "skip.txt")
 	plan := PlanResult{Items: []PlanItem{
-		{ID: "manual", Ecosystem: EcosystemAntigravity, Scope: ScopeManual, Action: ActionManual, TargetPath: manualPath, GeneratedContent: "manual\n"},
+		{ID: "manual", Ecosystem: EcosystemAntigravity, Scope: ScopeManual, Action: ActionManual, TargetPath: manualPath, GeneratedContent: "manual\n", ManualWarning: "Review this guidance manually"},
 		{ID: "skip", Ecosystem: EcosystemOllama, Scope: ScopeProjectLocal, Action: ActionSkip, TargetPath: skipPath, GeneratedContent: "skip\n"},
 	}}
 
@@ -82,8 +82,56 @@ func TestApplyNeverWritesManualOrSkipItems(t *testing.T) {
 	if len(result.Skipped) != 2 {
 		t.Fatalf("skipped = %d, want 2", len(result.Skipped))
 	}
+	if got, want := result.Skipped[0].Reason, "Review this guidance manually"; got != want {
+		t.Fatalf("manual reason = %q, want %q", got, want)
+	}
+	if got, want := result.Skipped[1].Reason, "already configured"; got != want {
+		t.Fatalf("skip reason = %q, want %q", got, want)
+	}
 	assertNotExists(t, manualPath)
 	assertNotExists(t, skipPath)
+}
+
+func TestApplyUsesManualWarningDefaultForManualItemsWithoutExplicitWarning(t *testing.T) {
+	projectDir := t.TempDir()
+	manualPath := filepath.Join(projectDir, "manual.txt")
+	plan := PlanResult{Items: []PlanItem{
+		{ID: "manual", Ecosystem: EcosystemAntigravity, Scope: ScopeProjectLocal, Action: ActionManual, TargetPath: manualPath, GeneratedContent: "manual\n"},
+	}}
+
+	result := Apply(plan, ApplyApproval{Approved: true, UserGlobalApproved: true}, SetupEnv{ProjectDir: projectDir, FS: OSFileSystem{}})
+
+	if len(result.Applied) != 0 {
+		t.Fatalf("applied = %#v, want none", result.Applied)
+	}
+	if len(result.Skipped) != 1 {
+		t.Fatalf("skipped = %d, want 1", len(result.Skipped))
+	}
+	if got := result.Skipped[0].Reason; !strings.Contains(got, "review manually") {
+		t.Fatalf("manual reason = %q, want review message", got)
+	}
+	assertNotExists(t, manualPath)
+}
+
+func TestApplyUsesManualWarningForManualItems(t *testing.T) {
+	projectDir := t.TempDir()
+	manualPath := filepath.Join(projectDir, "manual.txt")
+	plan := PlanResult{Items: []PlanItem{
+		{ID: "manual", Ecosystem: EcosystemAntigravity, Scope: ScopeManual, Action: ActionManual, TargetPath: manualPath, GeneratedContent: "manual\n", ManualWarning: "Review this guidance manually"},
+	}}
+
+	result := Apply(plan, ApplyApproval{Approved: true, UserGlobalApproved: true}, SetupEnv{ProjectDir: projectDir, FS: OSFileSystem{}})
+
+	if len(result.Applied) != 0 {
+		t.Fatalf("applied = %#v, want none", result.Applied)
+	}
+	if len(result.Skipped) != 1 {
+		t.Fatalf("skipped = %d, want 1", len(result.Skipped))
+	}
+	if got := result.Skipped[0].Reason; got != "Review this guidance manually" {
+		t.Fatalf("manual reason = %q, want %q", got, "Review this guidance manually")
+	}
+	assertNotExists(t, manualPath)
 }
 
 func TestApplyUsesManagedBlocksForExistingFiles(t *testing.T) {
@@ -106,6 +154,34 @@ func TestApplyUsesManagedBlocksForExistingFiles(t *testing.T) {
 	}
 	if want := "BEGIN RAVEN MANAGED: agents"; !strings.Contains(content, want) {
 		t.Fatalf("content missing %q\n%s", want, content)
+	}
+}
+
+func TestApplyKeepsExistingManagedBlockWhenApplyingAdditionalOne(t *testing.T) {
+	projectDir := t.TempDir()
+	target := filepath.Join(projectDir, "AGENTS.md")
+	writeFile(t, target, "operator notes\n")
+	plan := PlanResult{Items: []PlanItem{
+		writableItem("agents", ScopeProjectLocal, target, "raven instructions\n"),
+		writableItem("agent-guidance", ScopeProjectLocal, target, "raven guidance\n"),
+	}}
+	plan.Items[0].ManagedBlockID = "agents"
+	plan.Items[1].ManagedBlockID = "agent-guidance"
+
+	result := Apply(plan, ApplyApproval{Approved: true}, SetupEnv{ProjectDir: projectDir, FS: OSFileSystem{}})
+
+	if len(result.Applied) != 2 {
+		t.Fatalf("applied = %#v, want two", result.Applied)
+	}
+	content := readFile(t, target)
+	if !strings.Contains(content, "BEGIN RAVEN MANAGED: agents") {
+		t.Fatalf("content missing first managed block\n%s", content)
+	}
+	if !strings.Contains(content, "BEGIN RAVEN MANAGED: agent-guidance") {
+		t.Fatalf("content missing second managed block\n%s", content)
+	}
+	if !strings.Contains(content, "operator notes") {
+		t.Fatalf("operator content not preserved\n%s", content)
 	}
 }
 
