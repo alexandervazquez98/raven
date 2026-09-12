@@ -74,17 +74,30 @@ func main() {
 		return
 	}
 
-	components, err := storage.LoadComponents(app.ComponentsPath(configDir))
+	programModel, err := buildDashboardModel(configDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load components: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	program := tea.NewProgram(tui.New(version.String(), components), tea.WithAltScreen())
+	program := tea.NewProgram(programModel, tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func buildDashboardModel(configDir string) (tui.Model, error) {
+	components, err := storage.LoadComponents(app.ComponentsPath(configDir))
+	if err != nil {
+		return tui.Model{}, fmt.Errorf("load components: %w", err)
+	}
+	events, err := storage.LoadEvents(app.EventsPath(configDir))
+	if err != nil {
+		return tui.Model{}, fmt.Errorf("load events: %w", err)
+	}
+
+	return tui.NewWithEvents(version.String(), components, events), nil
 }
 
 func setupUsage() string {

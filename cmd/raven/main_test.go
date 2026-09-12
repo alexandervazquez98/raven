@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSelectRunMode(t *testing.T) {
 	tests := []struct {
@@ -26,5 +29,18 @@ func TestSelectRunMode(t *testing.T) {
 				t.Fatalf("selectRunMode(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildDashboardModelLoadsMissingEventsAsEmpty(t *testing.T) {
+	model, err := buildDashboardModel(t.TempDir())
+	if err != nil {
+		t.Fatalf("buildDashboardModel() error = %v, want nil", err)
+	}
+	view := model.View()
+	for _, want := range []string{"Main menu", "Install", "Recent Memories", "Search", "Exit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("dashboard view = %q, want %q", view, want)
+		}
 	}
 }
