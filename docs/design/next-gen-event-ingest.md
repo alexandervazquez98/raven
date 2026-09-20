@@ -108,8 +108,8 @@ raven timeline RAVEN-DEV-001
 Implemented Raven surfaces:
 
 1. `Event` domain model.
-2. JSON event storage at `~/.config/raven/events.json`.
-3. JSON alias/reference storage at `~/.config/raven/aliases.json`.
+2. JSON event storage at `~/.config/raven/events.json` (overridable via `--data-dir` global CLI flag or `RAVEN_DATA_DIR` environment variable; flag wins when both are set).
+3. JSON alias/reference storage at `~/.config/raven/aliases.json` (overridable via `--data-dir` global CLI flag or `RAVEN_DATA_DIR` environment variable; flag wins when both are set).
 4. CLI commands: `event add`, `event capture`, `event ingest`, `timeline`, `alias add`, `alias list`, and `alias resolve`.
 5. `event ingest` accepts exactly one input source: `--file <json>` or `--stdin`.
 6. Deduplication by `dedup_key` for structured ingest.

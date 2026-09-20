@@ -49,25 +49,36 @@ Raven writes JSON files under a `raven/` subdirectory of the OS user config dir.
 
 Resolve the path the agent will reference. Cache the resolved value and reuse it in every later step:
 
+> **Override precedence** (see issue #28): `--data-dir <path>` global CLI flag wins, otherwise the `RAVEN_DATA_DIR` environment variable is used, otherwise Raven falls back to the OS user config directory (`~/.config/raven/` on Linux, `~/Library/Application Support/raven/` on macOS, `%AppData%\raven\` on Windows). When both are set, the flag wins. Whitespace-only values are treated as unset.
+
 ```bash
 # Detect once, reuse everywhere
 case "$(uname -s)" in
-  Darwin) RAVEN_STORAGE_DIR="$HOME/Library/Application Support/raven" ;;
-  Linux)  RAVEN_STORAGE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/raven" ;;
+  Darwin) RAVEN_DATA_DIR="$HOME/Library/Application Support/raven" ;;
+  Linux)  RAVEN_DATA_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/raven" ;;
   *)      echo "Unsupported OS — derive from Go's os.UserConfigDir()" >&2; exit 1 ;;
 esac
-export RAVEN_STORAGE_DIR
+export RAVEN_DATA_DIR
 
 # Trigger lazy directory creation
 ./raven alias list
 
 # Verify
-ls -la "$RAVEN_STORAGE_DIR"
+ls -la "$RAVEN_DATA_DIR"
+```
+
+```powershell
+# Windows (PowerShell) — equivalent of the bash block above
+$env:RAVEN_DATA_DIR = Join-Path $env:APPDATA "raven"
+# Trigger lazy directory creation
+.\raven.exe alias list
+# Verify
+Get-ChildItem $env:RAVEN_DATA_DIR
 ```
 
 Expected files after first use: `components.json`, `events.json`, `aliases.json`. The directory is created lazily on first write. If the directory does not exist yet, that is normal — `raven alias list` creates it.
 
-All subsequent steps in this guide use `$RAVEN_STORAGE_DIR` to refer to the resolved path.
+All subsequent steps in this guide use `$RAVEN_DATA_DIR` to refer to the resolved path.
 
 ## Step 3 — Pre-seed at least one CI and one alias
 
@@ -111,13 +122,13 @@ Open a new chat in Open WebUI and ask the agent to perform each of the following
 | 1 | "List the available Raven tools" | Seven tools reported: `resolve_ci_ref`, `record_event`, `get_timeline`, `list_cis`, `get_ci`, `get_ci_metadata`, `set_ci_metadata` |
 | 2 | "Resolve the alias next-gen ci_id 42" | Returns the canonical `ci_id` registered in Step 3 |
 | 3 | "Show the timeline for that CI" | Returns an empty array or existing events |
-| 4 | "Record an observation that this verification ran" | Returns the persisted event; `$RAVEN_STORAGE_DIR/events.json` updated on disk |
+| 4 | "Record an observation that this verification ran" | Returns the persisted event; `$RAVEN_DATA_DIR/events.json` updated on disk |
 
 If step 1 fails, the MCP server did not register correctly. Return to Step 4.
 
 If step 2 returns `unknown alias`, the seed in Step 3 was skipped. Return to Step 3.
 
-If step 4 does not produce a new entry in `$RAVEN_STORAGE_DIR/events.json`, the agent may have called the wrong tool or omitted a required parameter. Re-read [Tool reference](#tool-reference) and retry once.
+If step 4 does not produce a new entry in `$RAVEN_DATA_DIR/events.json`, the agent may have called the wrong tool or omitted a required parameter. Re-read [Tool reference](#tool-reference) and retry once.
 
 ## Identity discipline
 
@@ -297,8 +308,8 @@ If a query is unanswerable with these patterns, stop and tell the operator that 
 | `unknown alias` from `resolve_ci_ref` | The alias was never registered, or source/type/value do not match exactly | Confirm with `raven alias list`; re-register if missing |
 | `unknown ci_id` from `record_event` | Agent passed an upstream ID as `ci_id` instead of `ci_ref` | Re-call with `ci_ref`; do not retry with the same argument |
 | Tool not appearing in Open WebUI | MCP server not registered or reload not triggered | Return to Step 4; verify command path and args |
-| Tool appears but fails immediately | Binary not executable, or wrong working directory for `$RAVEN_STORAGE_DIR` | `chmod +x <raven-binary>`; verify storage path |
-| `events.json` not updating on disk | Storage path mismatch or read-only mount | Confirm path via `ls -la "$RAVEN_STORAGE_DIR"` |
+| Tool appears but fails immediately | Binary not executable, or wrong working directory for `$RAVEN_DATA_DIR` | `chmod +x <raven-binary>`; verify storage path |
+| `events.json` not updating on disk | Storage path mismatch or read-only mount | Confirm path via `ls -la "$RAVEN_DATA_DIR"` |
 | Concurrent writes from multiple agents | JSON storage is not concurrency-safe | Serialize writes; limit to one writer process per host |
 
 ## What NOT to do
@@ -318,7 +329,7 @@ If a query is unanswerable with these patterns, stop and tell the operator that 
 
 These are project-level constraints, not bugs. Plan around them.
 
-- Storage is JSON files under the OS user config directory (`$RAVEN_STORAGE_DIR`). SQLite migration is on the roadmap but not implemented.
+- Storage is JSON files under the OS user config directory (`$RAVEN_DATA_DIR`). SQLite migration is on the roadmap but not implemented.
 - No update or delete operations on events.
 - No free-text search across events; only per-CI timeline reads.
 - No concurrent-write safety. One writer process per host.
@@ -330,13 +341,13 @@ Before handing the integration back to the operator, confirm:
 
 - [ ] `raven version` prints a version string
 - [ ] `go test ./...` passes
-- [ ] At least one canonical `ci_id` exists in `$RAVEN_STORAGE_DIR/components.json`
-- [ ] At least one alias exists in `$RAVEN_STORAGE_DIR/aliases.json` and resolves correctly
+- [ ] At least one canonical `ci_id` exists in `$RAVEN_DATA_DIR/components.json`
+- [ ] At least one alias exists in `$RAVEN_DATA_DIR/aliases.json` and resolves correctly
 - [ ] The MCP server is registered in Open WebUI's admin panel
 - [ ] The agent can list the seven MCP tools in a new chat
 - [ ] `resolve_ci_ref` returns the expected `ci_id`
 - [ ] `record_event` appends a new event visible in `get_timeline`
-- [ ] `$RAVEN_STORAGE_DIR/events.json` reflects the new entry
+- [ ] `$RAVEN_DATA_DIR/events.json` reflects the new entry
 - [ ] The operator has been told the JSON storage caveat and the append-only constraint
 
 ## Next step

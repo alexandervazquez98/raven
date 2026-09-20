@@ -155,7 +155,7 @@ raven alias list
 raven alias resolve --source next-gen --type ci_id --value 42
 ```
 
-Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source + type + value`; Raven rejects unknown canonical CIs and duplicate or conflicting mappings. Alias values are exact-match after trimming whitespace, so adapters should pass a consistent hostname, MAC, IP, serial, or upstream ID format.
+Aliases are stored in `~/.config/raven/aliases.json` (overridable via the `--data-dir` global CLI flag or the `RAVEN_DATA_DIR` environment variable; see [Storage paths](integrations/open-webui.md#step-2--confirm-local-storage-paths) for details). The unique key is `source + type + value`; Raven rejects unknown canonical CIs and duplicate or conflicting mappings. Alias values are exact-match after trimming whitespace, so adapters should pass a consistent hostname, MAC, IP, serial, or upstream ID format.
 
 ## Current limitations
 
