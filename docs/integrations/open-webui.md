@@ -194,8 +194,16 @@ Returns: `{ "ci_id": "...", "events": [...] }`. Read-only, idempotent.
 ### `raven_list_cis`
 
 Purpose: list every known CI.
-Inputs: none.
-Returns: `{ "cis": [...] }`. Read-only, idempotent.
+Inputs:
+
+| Parameter | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `category` | string | no | `""` | Exact-match filter on `Component.Category` (for example `network`, `hardware`). Empty means no filter. |
+| `prefix` | string | no | `""` | Case-sensitive prefix filter on `ci_id` (for example `TWR-`). Empty means no filter. |
+| `query` | string | no | `""` | Case-insensitive substring search across `ci_id`, `model`, and `notes`. Empty means no filter. |
+| `limit` | number | no | `0` | Maximum number of CIs to return after filtering. `0` or negative means no cap. |
+
+Returns: `{ "cis": [...] }`. Read-only, idempotent. Filters compose with AND semantics.
 
 ### `raven_get_ci`
 

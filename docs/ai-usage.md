@@ -44,10 +44,17 @@ Initial tools:
 | `raven_resolve_ci_ref` | Resolve `source + type + value` to canonical Raven `ci_id`. |
 | `raven_record_event` | Record an event with either canonical `ci_id` or a `ci_ref` alias object. |
 | `raven_get_timeline` | Read timeline events for a canonical CI. |
-| `raven_list_cis` | List known CIs. |
+| `raven_list_cis` | List known CIs; accepts optional `category`, `prefix`, `query`, and `limit` filters (see below). |
 | `raven_get_ci` | Read one CI by canonical ID. |
 
 `raven_record_event` follows the same identity rule as CLI ingest: use `ci_id` only when it is already a Raven canonical ID; otherwise pass upstream identifiers as `ci_ref`.
+
+`raven_list_cis` accepts four optional filter parameters that compose with AND semantics. Omit them (or pass empty values) to keep the default unfiltered behavior.
+
+- `category` (string): exact-match filter on `Component.Category` (for example `network`, `hardware`).
+- `prefix` (string): case-sensitive prefix filter on `ci_id` (for example `TWR-`).
+- `query` (string): case-insensitive substring search across `ci_id`, `model`, and `notes`.
+- `limit` (number): maximum number of CIs to return after filtering. `0` or negative means no cap.
 
 ## Command patterns
 

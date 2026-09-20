@@ -118,6 +118,18 @@ func registerTools(srv *mcpserver.MCPServer, svc service.Service) {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 		mcp.WithSchemaAdditionalProperties(false),
+		mcp.WithString("category",
+			mcp.Description("Optional exact-match filter on Component.Category (e.g. 'network', 'hardware'). Empty means no filter."),
+		),
+		mcp.WithString("prefix",
+			mcp.Description("Optional case-sensitive prefix filter on ci_id (e.g. 'TWR-'). Empty means no filter."),
+		),
+		mcp.WithString("query",
+			mcp.Description("Optional case-insensitive substring search across ci_id, model, and notes. Empty means no filter."),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Optional maximum number of CIs to return after filtering. 0 or negative means no cap."),
+		),
 	), handleListCIs(svc))
 
 	srv.AddTool(mcp.NewTool(ToolGetCI,
@@ -202,7 +214,11 @@ func handleGetTimeline(svc service.Service) mcpserver.ToolHandlerFunc {
 
 func handleListCIs(svc service.Service) mcpserver.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		components, err := svc.ListCIs()
+		var filter service.ListFilter
+		if err := request.BindArguments(&filter); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid list_cis arguments: %v", err)), nil
+		}
+		components, err := svc.ListCIsWithFilter(filter)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

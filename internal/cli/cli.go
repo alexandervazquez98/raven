@@ -114,19 +114,45 @@ func runCIAdd(args []string, configDir string, stdout, stderr io.Writer) error {
 }
 
 func runCIList(args []string, configDir string, stdout, stderr io.Writer) error {
-	if len(args) != 0 {
-		err := errors.New("ci list does not accept arguments")
+	flags := flag.NewFlagSet("ci list", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	category := flags.String("category", "", "exact-match filter on component category")
+	prefix := flags.String("prefix", "", "case-sensitive prefix filter on ci_id")
+	query := flags.String("query", "", "case-insensitive substring search across ci_id, model, and notes")
+	limit := flags.Int("limit", 0, "maximum number of CIs to return after filtering (0 or negative means no cap)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		err := errors.New("ci list does not accept positional arguments")
 		fmt.Fprintln(stderr, err)
 		return err
 	}
 
-	components, _, err := loadInventory(configDir)
+	all, _, err := loadInventory(configDir)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return err
 	}
+
+	filter := service.ListFilter{
+		Category: strings.TrimSpace(*category),
+		Prefix:   *prefix,
+		Query:    strings.TrimSpace(*query),
+		Limit:    *limit,
+	}
+	components, err := service.New(configDir).ListCIsWithFilter(filter)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
 	if len(components) == 0 {
-		fmt.Fprintln(stdout, "No CIs yet.")
+		if len(all) == 0 {
+			fmt.Fprintln(stdout, "No CIs yet.")
+		} else {
+			fmt.Fprintln(stdout, "No CIs matched the provided filters.")
+		}
 		return nil
 	}
 

@@ -146,6 +146,121 @@ func TestMCPHandlersListAndGetCIs(t *testing.T) {
 	}
 }
 
+func TestMCPListCIsFilters(t *testing.T) {
+	configDir := t.TempDir()
+	if err := storage.SaveComponents(app.ComponentsPath(configDir), []domain.Component{
+		{CIID: "FW-MAIN-001", Category: "network", Manufacturer: "Fortinet", Model: "FortiGate", Notes: "Primary edge firewall"},
+		{CIID: "TWR-CORE-001", Category: "network", Manufacturer: "Cisco", Model: "Catalyst 9300", Notes: "Core switch"},
+		{CIID: "SRV-DB-001", Category: "server", Manufacturer: "Dell", Model: "PowerEdge R750", Notes: "Database host"},
+	}); err != nil {
+		t.Fatalf("SaveComponents() error = %v, want nil", err)
+	}
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	type wantSet struct {
+		ids     []string
+		absent  []string
+	}
+	tests := []struct {
+		name string
+		args map[string]any
+		want wantSet
+	}{
+		{
+			name: "no args returns all",
+			args: nil,
+			want: wantSet{ids: []string{"FW-MAIN-001", "TWR-CORE-001", "SRV-DB-001"}},
+		},
+		{
+			name: "category exact match",
+			args: map[string]any{"category": "network"},
+			want: wantSet{
+				ids:    []string{"FW-MAIN-001", "TWR-CORE-001"},
+				absent: []string{"SRV-DB-001"},
+			},
+		},
+		{
+			name: "prefix",
+			args: map[string]any{"prefix": "TWR-"},
+			want: wantSet{
+				ids:    []string{"TWR-CORE-001"},
+				absent: []string{"FW-MAIN-001", "SRV-DB-001"},
+			},
+		},
+		{
+			name: "query case-insensitive on model",
+			args: map[string]any{"query": "forti"},
+			want: wantSet{
+				ids:    []string{"FW-MAIN-001"},
+				absent: []string{"TWR-CORE-001", "SRV-DB-001"},
+			},
+		},
+		{
+			name: "limit caps",
+			args: map[string]any{"limit": float64(2)},
+			want: wantSet{ids: []string{"FW-MAIN-001", "TWR-CORE-001"}},
+		},
+		{
+			name: "category plus prefix combines",
+			args: map[string]any{"category": "network", "prefix": "FW-"},
+			want: wantSet{
+				ids:    []string{"FW-MAIN-001"},
+				absent: []string{"TWR-CORE-001", "SRV-DB-001"},
+			},
+		},
+		{
+			name: "query plus limit combines",
+			args: map[string]any{"query": "o", "limit": float64(1)},
+			want: wantSet{ids: []string{"FW-MAIN-001"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := callTool(t, tools[ToolListCIs].Handler, tt.args)
+			if result.IsError {
+				t.Fatalf("list result is error: %s", resultText(result))
+			}
+			cis := result.StructuredContent.(map[string]any)["cis"].([]domain.Component)
+			if len(cis) != len(tt.want.ids) {
+				t.Fatalf("cis length = %d, want %d (cis=%#v)", len(cis), len(tt.want.ids), cis)
+			}
+			seen := make(map[string]bool, len(cis))
+			for _, ci := range cis {
+				seen[ci.CIID] = true
+			}
+			for _, want := range tt.want.ids {
+				if !seen[want] {
+					t.Fatalf("cis = %#v, want to contain %q", cis, want)
+				}
+			}
+			for _, absent := range tt.want.absent {
+				if seen[absent] {
+					t.Fatalf("cis = %#v, did not want %q", cis, absent)
+				}
+			}
+		})
+	}
+}
+
+func TestNewServerListCIsSchemaAdvertisesOptionalFilters(t *testing.T) {
+	srv := NewServer(ServerConfig{ConfigDir: t.TempDir()})
+	listTool := srv.ListTools()[ToolListCIs].Tool
+
+	assertStrictTopLevelSchema(t, listTool)
+	for _, field := range []string{"category", "prefix", "query", "limit"} {
+		if _, ok := listTool.InputSchema.Properties[field]; !ok {
+			t.Fatalf("list_cis schema missing optional field %q (properties=%v)", field, listTool.InputSchema.Properties)
+		}
+	}
+	for _, required := range listTool.InputSchema.Required {
+		if required == "category" || required == "prefix" || required == "query" || required == "limit" {
+			t.Fatalf("list_cis schema unexpectedly requires %q (required=%v)", required, listTool.InputSchema.Required)
+		}
+	}
+}
+
 func TestMCPHandlersReturnReadableErrors(t *testing.T) {
 	configDir := t.TempDir()
 	seedMCPData(t, configDir)

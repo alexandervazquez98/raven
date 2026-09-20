@@ -50,6 +50,46 @@ func (s Service) ListCIs() ([]domain.Component, error) {
 	return storage.LoadComponents(app.ComponentsPath(s.ConfigDir))
 }
 
+// ListFilter narrows the results of ListCIs. Zero value means "no filter".
+type ListFilter struct {
+	Category string
+	Prefix   string
+	Query    string
+	Limit    int
+}
+
+func (s Service) ListCIsWithFilter(filter ListFilter) ([]domain.Component, error) {
+	components, err := storage.LoadComponents(app.ComponentsPath(s.ConfigDir))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Component, 0, len(components))
+	cat := strings.TrimSpace(filter.Category)
+	prefix := filter.Prefix
+	q := strings.ToLower(strings.TrimSpace(filter.Query))
+	for _, c := range components {
+		if cat != "" && string(c.Category) != cat {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(c.CIID, prefix) {
+			continue
+		}
+		if q != "" {
+			ciid := strings.ToLower(c.CIID)
+			model := strings.ToLower(c.Model)
+			notes := strings.ToLower(c.Notes)
+			if !strings.Contains(ciid, q) && !strings.Contains(model, q) && !strings.Contains(notes, q) {
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
 func (s Service) GetCI(ciID string) (domain.Component, error) {
 	_, inventory, err := s.loadInventory()
 	if err != nil {
