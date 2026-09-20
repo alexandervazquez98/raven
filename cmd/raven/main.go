@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"raven/internal/app"
@@ -44,7 +45,13 @@ func selectRunMode(args []string) runMode {
 }
 
 func main() {
-	args := os.Args[1:]
+	rawArgs := os.Args[1:]
+	flagValue, args := parseGlobalFlags(rawArgs)
+	configDir, err := resolveDataDir(flagValue)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve config directory: %v\n", err)
+		os.Exit(1)
+	}
 	mode := selectRunMode(args)
 
 	switch mode {
@@ -62,11 +69,6 @@ func main() {
 		return
 	}
 
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "resolve config directory: %v\n", err)
-		os.Exit(1)
-	}
 	if mode == runModeCLI {
 		if err := cli.Run(args, configDir, os.Stdout, os.Stderr); err != nil {
 			os.Exit(1)
@@ -85,6 +87,44 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// parseGlobalFlags extracts --data-dir from args and returns the residual.
+// Supports both "--data-dir <value>" and "--data-dir=<value>" forms.
+// If --data-dir is the last token with no value, returns ("", residual).
+func parseGlobalFlags(args []string) (dataDir string, residual []string) {
+	residual = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--data-dir":
+			if i+1 < len(args) {
+				dataDir = args[i+1]
+				i++ // consume the value
+			}
+			// If --data-dir is the last token with no value, fall through
+			// and let resolveDataDir treat it as empty.
+			continue
+		case strings.HasPrefix(a, "--data-dir="):
+			dataDir = strings.TrimPrefix(a, "--data-dir=")
+			continue
+		}
+		residual = append(residual, a)
+	}
+	return dataDir, residual
+}
+
+// resolveDataDir applies precedence: flag (if non-empty after trim) > env (if non-empty after trim) > os.UserConfigDir() default.
+func resolveDataDir(flagValue string) (string, error) {
+	flagValue = strings.TrimSpace(flagValue)
+	if flagValue != "" {
+		return flagValue, nil
+	}
+	envValue := strings.TrimSpace(os.Getenv("RAVEN_DATA_DIR"))
+	if envValue != "" {
+		return envValue, nil
+	}
+	return os.UserConfigDir()
 }
 
 func buildDashboardModel(configDir string) (tui.Model, error) {
