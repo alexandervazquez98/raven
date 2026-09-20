@@ -28,10 +28,12 @@ Use these actions in order; prefer MCP when available and CLI fallback otherwise
 
 | Action | MCP | CLI fallback |
 | --- | --- | --- |
-| Resolve CI/ref | `raven_resolve_ci_ref` | `raven alias resolve --source <source> --type <type> --value <value>` |
-| Read timeline | `raven_get_timeline` | `raven timeline <ci-id>` |
-| Confirm CI | `raven_get_ci` / `raven_list_cis` | `raven ci show <ci-id>` / `raven ci list` |
-| Record event | `raven_record_event` | `raven event capture` or `raven event ingest` |
+| Resolve CI/ref | `resolve_ci_ref` | `raven alias resolve --source <source> --type <type> --value <value>` |
+| Read timeline | `get_timeline` | `raven timeline <ci-id>` |
+| Confirm CI | `get_ci` / `list_cis` | `raven ci show <ci-id>` / `raven ci list` |
+| Record event | `record_event` | `raven event capture` or `raven event ingest` |
+| Read metadata | `get_ci_metadata` | (no CLI fallback yet) |
+| Upsert metadata | `set_ci_metadata` | (no CLI fallback yet) |
 
 Next-gen enrichment is required when next-gen/event telemetry is involved. Prefer the read-only next-gen MCP tools when configured: `nextgen_list_events`, `nextgen_get_event`, `nextgen_search_cis`, `nextgen_get_ci_events`, `nextgen_get_ci_metrics`, and `nextgen_build_raven_event_candidate`. If the adapter is unavailable, ask the user for the event payload/output. Mutating next-gen tools such as diagnostic runs, ack, comments, and close actions are intentionally future work and require explicit operator approval.
 
@@ -39,10 +41,10 @@ Next-gen enrichment is required when next-gen/event telemetry is involved. Prefe
 
 1. Extract candidate identifiers: `ci_id`, IP, hostname, serial, MAC, next-gen ID, event/ticket reference.
 2. If canonical CI is unknown, resolve with Raven alias tools/CLI. If unresolved, ask one focused question.
-3. Read recent context with `raven_get_timeline` or `raven timeline <ci-id>` and keep only relevant facts.
+3. Read recent context with `get_timeline` or `raven timeline <ci-id>` and keep only relevant facts.
 4. Enrich from next-gen when applicable; collect raw payload, `external_id`, observed time, severity, affected reference, `business_context`, `itsm_context`, and evidence.
 5. Respect next-gen AI guardrails: cooldowns, no forced close, critical event human escalation, and normal close note shape (`Causa raíz:` + `Nota:`).
-6. Record the initial useful event with `raven_record_event` or `raven event capture/ingest` once identity and evidence are sufficient.
+6. Record the initial useful event with `record_event` or `raven event capture/ingest` once identity and evidence are sufficient.
 7. Support diagnosis/repair, separating observations from hypotheses.
 8. On closure, record a concise `resolution`; if unresolved, record `follow_up` with next action.
 

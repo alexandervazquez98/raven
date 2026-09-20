@@ -108,7 +108,7 @@ Open a new chat in Open WebUI and ask the agent to perform each of the following
 
 | # | Ask the agent to | Expected result |
 |---|---|---|
-| 1 | "List the available Raven tools" | Five tools reported: `raven_resolve_ci_ref`, `raven_record_event`, `raven_get_timeline`, `raven_list_cis`, `raven_get_ci` |
+| 1 | "List the available Raven tools" | Seven tools reported: `resolve_ci_ref`, `record_event`, `get_timeline`, `list_cis`, `get_ci`, `get_ci_metadata`, `set_ci_metadata` |
 | 2 | "Resolve the alias next-gen ci_id 42" | Returns the canonical `ci_id` registered in Step 3 |
 | 3 | "Show the timeline for that CI" | Returns an empty array or existing events |
 | 4 | "Record an observation that this verification ran" | Returns the persisted event; `$RAVEN_STORAGE_DIR/events.json` updated on disk |
@@ -125,23 +125,23 @@ Raven distinguishes between canonical `ci_id` and upstream references. This is n
 
 | Identifier shape | Use it with | Never use it with |
 |---|---|---|
-| Canonical `ci_id` (e.g. `RAVEN-FW-MAIN-001`) | `raven_record_event` when the agent already knows it from a prior lookup or operator input | Anything that was not created via `raven ci add` |
-| Upstream ID, IP, hostname, serial, MAC | Wrap as `ci_ref` object: `{"source": "<source>", "type": "<type>", "value": "<value>"}` and pass to `raven_record_event` or `raven_resolve_ci_ref` | As a literal `ci_id` in `raven_record_event` |
+| Canonical `ci_id` (e.g. `RAVEN-FW-MAIN-001`) | `record_event` when the agent already knows it from a prior lookup or operator input | Anything that was not created via `raven ci add` |
+| Upstream ID, IP, hostname, serial, MAC | Wrap as `ci_ref` object: `{"source": "<source>", "type": "<type>", "value": "<value>"}` and pass to `record_event` or `resolve_ci_ref` | As a literal `ci_id` in `record_event` |
 
 When in doubt: resolve first, then write.
 
 ```text
 upstream reference
-  → raven_resolve_ci_ref
+  → resolve_ci_ref
   → canonical ci_id (or rejection if unknown)
-  → raven_record_event with ci_id
+  → record_event with ci_id
 ```
 
 Do not skip the resolve step even if the agent "thinks" the ID is canonical. Raven will reject unknown `ci_id` values and that rejection is the signal to resolve first.
 
 ## Tool reference
 
-### `raven_resolve_ci_ref`
+### `resolve_ci_ref`
 
 Purpose: map an upstream identifier to a canonical Raven `ci_id`.
 Inputs:
@@ -155,7 +155,7 @@ Inputs:
 Returns: `{ "ci_id": "<canonical>" }` or an error if no alias matches.
 Idempotent. Read-only.
 
-### `raven_record_event`
+### `record_event`
 
 Purpose: append one event to a CI's timeline.
 Inputs (all required unless marked optional):
@@ -180,7 +180,7 @@ Inputs (all required unless marked optional):
 Exactly one of `ci_id` or `ci_ref` must be present. Exactly one of `external_id` or `dedup_key` must be present.
 Not idempotent. Use `dedup_key` to make replays safe.
 
-### `raven_get_timeline`
+### `get_timeline`
 
 Purpose: read all events for one CI in chronological order.
 Inputs:
@@ -191,7 +191,7 @@ Inputs:
 
 Returns: `{ "ci_id": "...", "events": [...] }`. Read-only, idempotent.
 
-### `raven_list_cis`
+### `list_cis`
 
 Purpose: list every known CI.
 Inputs:
@@ -205,7 +205,7 @@ Inputs:
 
 Returns: `{ "cis": [...] }`. Read-only, idempotent. Filters compose with AND semantics.
 
-### `raven_get_ci`
+### `get_ci`
 
 Purpose: fetch one CI by canonical ID.
 Inputs:
@@ -216,18 +216,42 @@ Inputs:
 
 Returns: `{ "ci": {...} }`. Read-only, idempotent.
 
+### `get_ci_metadata`
+
+Purpose: read the metadata sidecar entry for one canonical Raven CI. Returns an empty entry (no error) when the CI has no metadata yet.
+Inputs:
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| `ci_id` | string | yes | Canonical Raven CI ID |
+
+Returns: `{ "ci_id": "...", "attributes": {...}, "relationships": [...] }`. Read-only, idempotent.
+
+### `set_ci_metadata`
+
+Purpose: upsert a metadata sidecar entry for one canonical Raven CI. Each field uses REPLACE semantics: omit a field to preserve it, supply an empty object/array to clear it, supply a non-empty value to set it.
+Inputs:
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| `ci_id` | string | yes | Canonical Raven CI ID |
+| `attributes` | object map | optional | Map of attribute name to TypedValue (`{"string": "x"}`, `{"number": 45}`, `{"bool": true}`, `{"enum": "x"}`). Omit to preserve. Empty object clears all attributes. |
+| `relationships` | array of objects | optional | Array of `{target_ci_id, kind}` pairs. Replaces all existing relationships for the CI when supplied. Self-referential relationships (target equals `ci_id`) are rejected. |
+
+Returns: the resulting sidecar entry. Idempotent (replace semantics).
+
 ## Operational patterns
 
 ### Diagnosis → record → resolve
 
 ```text
 1. Operator reports an issue with an upstream identifier (IP, hostname, next-gen ci_id).
-2. Agent calls raven_resolve_ci_ref with the upstream identifier.
+2. Agent calls resolve_ci_ref with the upstream identifier.
    - On success → continue with returned canonical ci_id.
    - On failure → stop. Tell the operator the upstream identifier is unknown to Raven and ask for a canonical ci_id or an alias to add.
-3. Agent calls raven_get_timeline with the canonical ci_id to inspect prior context.
+3. Agent calls get_timeline with the canonical ci_id to inspect prior context.
 4. Agent performs diagnostic work (using its own tools, NOT Raven).
-5. Agent calls raven_record_event with:
+5. Agent calls record_event with:
    - ci_id (already resolved)
    - type: "diagnosis"
    - severity: matches the finding
@@ -235,20 +259,20 @@ Returns: `{ "ci": {...} }`. Read-only, idempotent.
    - source: stable agent identity
    - observed_at: current RFC3339 timestamp
    - external_id or dedup_key: stable across retries
-6. After resolution, agent calls raven_record_event again with:
+6. After resolution, agent calls record_event again with:
    - same ci_id
    - type: "resolution"
    - status: "closed"
    - summary describing the fix
    - dedup_key derived from the diagnosis external_id (e.g. "<diagnosis-external-id>:resolution")
-7. Optionally call raven_get_timeline to confirm both events are now visible.
+7. Optionally call get_timeline to confirm both events are now visible.
 ```
 
 Never delete or edit the diagnosis event when posting the resolution. The timeline is append-only. Corrections are new events that reference the prior `external_id` or `dedup_key`.
 
 ### Recording events from the CLI instead of MCP
 
-When the operator is at a terminal and not running an agent, two CLI commands cover the same write paths as `raven_record_event`:
+When the operator is at a terminal and not running an agent, two CLI commands cover the same write paths as `record_event`:
 
 | Command | Use when | Required args | Notable fields |
 |---|---|---|---|
@@ -261,8 +285,8 @@ Prefer `raven event add` whenever cross-system replay prevention matters. Prefer
 
 Raven does not currently support free-text event search. Two acceptable alternatives:
 
-1. List CIs via `raven_list_cis`, then call `raven_get_timeline` on each candidate. Use this when the search space is small.
-2. Filter events client-side after `raven_get_timeline` returns the full timeline of a known CI.
+1. List CIs via `list_cis`, then call `get_timeline` on each candidate. Use this when the search space is small.
+2. Filter events client-side after `get_timeline` returns the full timeline of a known CI.
 
 If a query is unanswerable with these patterns, stop and tell the operator that Raven lacks cross-CI search.
 
@@ -270,8 +294,8 @@ If a query is unanswerable with these patterns, stop and tell the operator that 
 
 | Symptom | Likely cause | Recovery |
 |---|---|---|
-| `unknown alias` from `raven_resolve_ci_ref` | The alias was never registered, or source/type/value do not match exactly | Confirm with `raven alias list`; re-register if missing |
-| `unknown ci_id` from `raven_record_event` | Agent passed an upstream ID as `ci_id` instead of `ci_ref` | Re-call with `ci_ref`; do not retry with the same argument |
+| `unknown alias` from `resolve_ci_ref` | The alias was never registered, or source/type/value do not match exactly | Confirm with `raven alias list`; re-register if missing |
+| `unknown ci_id` from `record_event` | Agent passed an upstream ID as `ci_id` instead of `ci_ref` | Re-call with `ci_ref`; do not retry with the same argument |
 | Tool not appearing in Open WebUI | MCP server not registered or reload not triggered | Return to Step 4; verify command path and args |
 | Tool appears but fails immediately | Binary not executable, or wrong working directory for `$RAVEN_STORAGE_DIR` | `chmod +x <raven-binary>`; verify storage path |
 | `events.json` not updating on disk | Storage path mismatch or read-only mount | Confirm path via `ls -la "$RAVEN_STORAGE_DIR"` |
@@ -284,7 +308,7 @@ If a query is unanswerable with these patterns, stop and tell the operator that 
 | Inventing a canonical `ci_id` | Rejected at write time; corrupts downstream references |
 | Passing an upstream ID as `ci_id` | Same — use `ci_ref` |
 | Deleting or rewriting past events | Timeline is append-only by design |
-| Calling `raven_record_event` without `external_id` or `dedup_key` | Rejected at write time |
+| Calling `record_event` without `external_id` or `dedup_key` | Rejected at write time |
 | Concurrent writes from multiple processes | JSON files have no transactional safety |
 | Storing secrets in `details` or `raw` fields | Raven is a timeline, not a vault — redact before write |
 | Treating Raven as the source of truth for live state | Raven is for facts about CIs over time. Live state belongs to monitoring systems |
@@ -309,9 +333,9 @@ Before handing the integration back to the operator, confirm:
 - [ ] At least one canonical `ci_id` exists in `$RAVEN_STORAGE_DIR/components.json`
 - [ ] At least one alias exists in `$RAVEN_STORAGE_DIR/aliases.json` and resolves correctly
 - [ ] The MCP server is registered in Open WebUI's admin panel
-- [ ] The agent can list the five `raven_*` tools in a new chat
-- [ ] `raven_resolve_ci_ref` returns the expected `ci_id`
-- [ ] `raven_record_event` appends a new event visible in `raven_get_timeline`
+- [ ] The agent can list the seven MCP tools in a new chat
+- [ ] `resolve_ci_ref` returns the expected `ci_id`
+- [ ] `record_event` appends a new event visible in `get_timeline`
 - [ ] `$RAVEN_STORAGE_DIR/events.json` reflects the new entry
 - [ ] The operator has been told the JSON storage caveat and the append-only constraint
 

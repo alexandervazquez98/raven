@@ -10,7 +10,7 @@ Issue #15 defines the first setup slice as a **project-local first pass**. `rave
 2. Prefer the MCP server for MCP-compatible agents: `raven mcp`.
 3. Read [`docs/ai-usage.md`](ai-usage.md) for the Raven memory rules.
 4. Make sure the agent can run the `raven` binary from its shell environment.
-5. Test with `raven timeline <ci-id>` or the MCP `raven_list_cis` tool.
+5. Test with `raven timeline <ci-id>` or the MCP `list_cis` tool.
 
 ## `raven setup` wizard
 
@@ -59,11 +59,13 @@ raven mcp
 
 The server provides these tools:
 
-- `raven_resolve_ci_ref`
-- `raven_record_event`
-- `raven_get_timeline`
-- `raven_list_cis`
-- `raven_get_ci`
+- `resolve_ci_ref`
+- `record_event`
+- `get_timeline`
+- `list_cis`
+- `get_ci`
+- `get_ci_metadata`
+- `set_ci_metadata`
 
 Use canonical Raven `ci_id` values when already known. If an agent only has an upstream ID, IP, hostname, serial, or MAC address, pass it as a `ci_ref` alias object; upstream IDs are not canonical Raven IDs. next-gen CI IDs are upstream references, not Raven CI IDs, and must be represented as `source=next-gen type=ci_id value=<nextgen_ci_id>` before resolution through Raven aliases.
 
