@@ -88,6 +88,157 @@ func TestTimelineRejectsUnknownCI(t *testing.T) {
 	}
 }
 
+func TestListCIsWithFilter(t *testing.T) {
+	components := []domain.Component{
+		{CIID: "FW-MAIN-001", Category: domain.CategoryCPU, Manufacturer: "Fortinet", Model: "FortiGate", Notes: "Primary edge firewall"},
+		{CIID: "TWR-CORE-001", Category: "network", Manufacturer: "Cisco", Model: "Catalyst 9300", Notes: "Core switch"},
+		{CIID: "SRV-DB-001", Category: "server", Manufacturer: "Dell", Model: "PowerEdge R750", Notes: "Database host"},
+	}
+
+	seed := func(t *testing.T) string {
+		t.Helper()
+		configDir := t.TempDir()
+		if err := storage.SaveComponents(app.ComponentsPath(configDir), components); err != nil {
+			t.Fatalf("SaveComponents() error = %v, want nil", err)
+		}
+		return configDir
+	}
+
+	t.Run("empty filter returns all", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != len(components) {
+			t.Fatalf("len(result) = %d, want %d", len(got), len(components))
+		}
+	})
+
+	t.Run("category exact match positive", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Category: "network"})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 1 || got[0].CIID != "TWR-CORE-001" {
+			t.Fatalf("result = %#v, want only TWR-CORE-001", got)
+		}
+	})
+
+	t.Run("category exact match negative", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Category: "missing-category"})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("result = %#v, want empty", got)
+		}
+	})
+
+	t.Run("prefix match", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Prefix: "FW-"})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 1 || got[0].CIID != "FW-MAIN-001" {
+			t.Fatalf("result = %#v, want only FW-MAIN-001", got)
+		}
+	})
+
+	t.Run("prefix is case sensitive", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Prefix: "fw-"})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("result = %#v, want empty (prefix is case sensitive)", got)
+		}
+	})
+
+	t.Run("query case-insensitive across fields", func(t *testing.T) {
+		configDir := seed(t)
+		tests := []struct {
+			name  string
+			query string
+			want  string
+		}{
+			{name: "matches ci_id", query: "fw-main", want: "FW-MAIN-001"},
+			{name: "matches model", query: "FORTI", want: "FW-MAIN-001"},
+			{name: "matches notes", query: "core switch", want: "TWR-CORE-001"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := New(configDir).ListCIsWithFilter(ListFilter{Query: tt.query})
+				if err != nil {
+					t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+				}
+				if len(got) != 1 || got[0].CIID != tt.want {
+					t.Fatalf("result = %#v, want only %q", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("limit caps result", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Limit: 2})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("len(result) = %d, want 2", len(got))
+		}
+	})
+
+	t.Run("limit zero means no cap", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Limit: 0})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != len(components) {
+			t.Fatalf("len(result) = %d, want %d (no cap)", len(got), len(components))
+		}
+	})
+
+	t.Run("limit negative means no cap", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Limit: -3})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != len(components) {
+			t.Fatalf("len(result) = %d, want %d (negative limit means no cap)", len(got), len(components))
+		}
+	})
+
+	t.Run("category plus prefix composes", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Category: "network", Prefix: "FW-"})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("result = %#v, want empty (FW-* with category network does not match TWR-CORE-001)", got)
+		}
+	})
+
+	t.Run("query plus limit composes", func(t *testing.T) {
+		configDir := seed(t)
+		got, err := New(configDir).ListCIsWithFilter(ListFilter{Query: "o", Limit: 1})
+		if err != nil {
+			t.Fatalf("ListCIsWithFilter() error = %v, want nil", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("len(result) = %d, want 1 (limit applied after filter)", len(got))
+		}
+	})
+}
+
 func seedCIAndAlias(t *testing.T, configDir string) {
 	t.Helper()
 	if err := storage.SaveComponents(app.ComponentsPath(configDir), []domain.Component{{CIID: "FW-MAIN-001", Category: "network", Manufacturer: "Fortinet", Model: "FortiGate"}}); err != nil {

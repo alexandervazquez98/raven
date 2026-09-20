@@ -135,8 +135,178 @@ func TestRunCIListRejectsExtraArgs(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run(ci list extra arg) error = nil, want error")
 	}
-	if !strings.Contains(stderr.String(), "ci list does not accept arguments") {
+	if !strings.Contains(stderr.String(), "ci list does not accept positional arguments") {
 		t.Fatalf("stderr = %q, want list arg error", stderr.String())
+	}
+}
+
+func seedInventoryForList(t *testing.T, configDir string) {
+	t.Helper()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	add := func(args ...string) {
+		t.Helper()
+		stdout.Reset()
+		stderr.Reset()
+		if err := Run(args, configDir, &stdout, &stderr); err != nil {
+			t.Fatalf("Run(%v) error = %v, want nil; stderr=%q", args, err, stderr.String())
+		}
+	}
+	add([]string{"ci", "add", "--ci-id", "FW-MAIN-001", "--category", "network", "--manufacturer", "Fortinet", "--model", "FortiGate", "--notes", "Primary edge firewall"}...)
+	add([]string{"ci", "add", "--ci-id", "TWR-CORE-001", "--category", "network", "--manufacturer", "Cisco", "--model", "Catalyst 9300", "--notes", "Core switch"}...)
+	add([]string{"ci", "add", "--ci-id", "SRV-DB-001", "--category", "server", "--manufacturer", "Dell", "--model", "PowerEdge R750", "--notes", "Database host"}...)
+}
+
+func TestRunCIListWithCategory(t *testing.T) {
+	configDir := t.TempDir()
+	seedInventoryForList(t, configDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"ci", "list", "--category", "network"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list --category) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	for _, want := range []string{"FW-MAIN-001", "TWR-CORE-001"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+		}
+	}
+	if strings.Contains(stdout.String(), "SRV-DB-001") {
+		t.Fatalf("stdout = %q, did not want SRV-DB-001", stdout.String())
+	}
+}
+
+func TestRunCIListWithPrefix(t *testing.T) {
+	configDir := t.TempDir()
+	seedInventoryForList(t, configDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"ci", "list", "--prefix", "TWR-"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list --prefix) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "TWR-CORE-001") {
+		t.Fatalf("stdout = %q, want TWR-CORE-001", stdout.String())
+	}
+	for _, missing := range []string{"FW-MAIN-001", "SRV-DB-001"} {
+		if strings.Contains(stdout.String(), missing) {
+			t.Fatalf("stdout = %q, did not want %q", stdout.String(), missing)
+		}
+	}
+}
+
+func TestRunCIListWithQuery(t *testing.T) {
+	configDir := t.TempDir()
+	seedInventoryForList(t, configDir)
+
+	tests := []struct {
+		name    string
+		query   string
+		wantRow string
+	}{
+		{name: "case-insensitive ci_id", query: "fw-main", wantRow: "FW-MAIN-001"},
+		{name: "case-insensitive model", query: "forti", wantRow: "FW-MAIN-001"},
+		{name: "case-insensitive notes", query: "core switch", wantRow: "TWR-CORE-001"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			if err := Run([]string{"ci", "list", "--query", tt.query}, configDir, &stdout, &stderr); err != nil {
+				t.Fatalf("Run(ci list --query %q) error = %v, want nil; stderr=%q", tt.query, err, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), tt.wantRow) {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), tt.wantRow)
+			}
+		})
+	}
+}
+
+func TestRunCIListWithLimit(t *testing.T) {
+	configDir := t.TempDir()
+	seedInventoryForList(t, configDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"ci", "list", "--limit", "2"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list --limit) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	rows := 0
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if strings.HasPrefix(line, "FW-MAIN-001") || strings.HasPrefix(line, "TWR-CORE-001") || strings.HasPrefix(line, "SRV-DB-001") {
+			rows++
+		}
+	}
+	if rows != 2 {
+		t.Fatalf("stdout rows under limit = %d, want 2; stdout=%q", rows, stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := Run([]string{"ci", "list", "--limit", "0"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list --limit 0) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	rows = 0
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if strings.HasPrefix(line, "FW-MAIN-001") || strings.HasPrefix(line, "TWR-CORE-001") || strings.HasPrefix(line, "SRV-DB-001") {
+			rows++
+		}
+	}
+	if rows != 3 {
+		t.Fatalf("stdout rows with limit 0 = %d, want 3 (no cap); stdout=%q", rows, stdout.String())
+	}
+}
+
+func TestRunCIListFiltersCombined(t *testing.T) {
+	configDir := t.TempDir()
+	seedInventoryForList(t, configDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"ci", "list", "--category", "network", "--prefix", "FW-"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list combined) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "FW-MAIN-001") {
+		t.Fatalf("stdout = %q, want FW-MAIN-001", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "TWR-CORE-001") {
+		t.Fatalf("stdout = %q, did not want TWR-CORE-001", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := Run([]string{"ci", "list", "--query", "forti", "--limit", "1"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list query+limit) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	rows := 0
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if strings.HasPrefix(line, "FW-MAIN-001") || strings.HasPrefix(line, "TWR-CORE-001") || strings.HasPrefix(line, "SRV-DB-001") {
+			rows++
+		}
+	}
+	if rows != 1 {
+		t.Fatalf("stdout rows under query+limit = %d, want 1; stdout=%q", rows, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "FW-MAIN-001") {
+		t.Fatalf("stdout = %q, want FW-MAIN-001", stdout.String())
+	}
+}
+
+func TestRunCIListNoMatchMessage(t *testing.T) {
+	configDir := t.TempDir()
+	seedInventoryForList(t, configDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"ci", "list", "--category", "power"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(ci list no match) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No CIs matched the provided filters.") {
+		t.Fatalf("stdout = %q, want filtered-empty message", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "FW-MAIN-001") {
+		t.Fatalf("stdout = %q, did not want any CI rows", stdout.String())
 	}
 }
 
