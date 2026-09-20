@@ -185,6 +185,67 @@ func (s Service) Timeline(ciID string) ([]domain.Event, error) {
 	return matched, nil
 }
 
+// GetCIMetadata returns the metadata sidecar entry for ciID. When the sidecar
+// has no entry for ciID, the function returns an empty entry carrying the
+// requested ci_id and nil/empty maps/slices (no error). Whitespace around the
+// ci_id argument is trimmed before lookup.
+func (s Service) GetCIMetadata(ciID string) (domain.CIMetadataEntry, error) {
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(s.ConfigDir))
+	if err != nil {
+		return domain.CIMetadataEntry{}, err
+	}
+	trimmed := strings.TrimSpace(ciID)
+	for _, entry := range sidecar.Entries {
+		if strings.TrimSpace(entry.CIID) == trimmed {
+			return entry, nil
+		}
+	}
+	return domain.CIMetadataEntry{CIID: ciID}, nil
+}
+
+// SetCIMetadata upserts the metadata sidecar entry for ciID. The attributes
+// and relationships arguments use REPLACE semantics with a three-way pointer
+// contract: nil means "do not touch the existing field"; a non-nil pointer to
+// an empty map/slice means "clear the field"; a non-nil pointer to a populated
+// map/slice means "replace the field". The whole sidecar is validated before
+// save by storage.SaveMetadata, so duplicated ci_id, malformed TypedValue, and
+// self-referential relationships all surface here as domain sentinels.
+func (s Service) SetCIMetadata(ciID string, attributes *map[string]domain.TypedValue, relationships *[]domain.CIRelationship) error {
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(s.ConfigDir))
+	if err != nil {
+		return err
+	}
+	trimmed := strings.TrimSpace(ciID)
+	idx := -1
+	for i, entry := range sidecar.Entries {
+		if strings.TrimSpace(entry.CIID) == trimmed {
+			idx = i
+			break
+		}
+	}
+	var entry domain.CIMetadataEntry
+	if idx >= 0 {
+		entry = sidecar.Entries[idx]
+	} else {
+		entry = domain.CIMetadataEntry{CIID: ciID}
+	}
+	if entry.Attributes == nil {
+		entry.Attributes = map[string]domain.TypedValue{}
+	}
+	if attributes != nil {
+		entry.Attributes = *attributes
+	}
+	if relationships != nil {
+		entry.Relationships = *relationships
+	}
+	if idx >= 0 {
+		sidecar.Entries[idx] = entry
+	} else {
+		sidecar.Entries = append(sidecar.Entries, entry)
+	}
+	return storage.SaveMetadata(app.MetadataPath(s.ConfigDir), sidecar)
+}
+
 func (r CIRef) AliasKey() domain.AliasKey {
 	return domain.AliasKey{Source: r.Source, Type: r.Type, Value: r.Value}
 }
