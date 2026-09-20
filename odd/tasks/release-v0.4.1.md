@@ -31,8 +31,8 @@ Two independent improvements, no code coupling, batched into a single release fo
 
 | # | Issue | Scope (summary) | Branch | PR | Commit hash |
 |---|---|---|---|---|---|
-| 1 | #27 | Drop `raven_` prefix from MCP tool constants + docs + skill + reconcile inconsistent inline strings | `release/v0.4.1` | TBD | TBD |
-| 2 | #28 | `--data-dir` global flag + `RAVEN_DATA_DIR` env var + precedence tests + doc updates | `release/v0.4.1` | TBD | TBD |
+| 1 | #27 | Drop `raven_` prefix from MCP tool constants + docs + skill + reconcile inconsistent inline strings | `release/v0.4.1` | #32 | `c590fd8` (PR commit) / `bed8d64` (merge commit) |
+| 2 | #28 | `--data-dir` global flag + `RAVEN_DATA_DIR` env var + precedence tests + doc updates | `release/v0.4.1` | #33 | `278b804` (PR commit) / `1e416f9` (merge commit) |
 | 3 | release | CHANGELOG `[0.4.1]` entry + `release/v0.4.1` → `main` merge | `release/v0.4.1` | direct | TBD |
 
 ## PR 1 (#27) acceptance criteria
@@ -64,7 +64,7 @@ Two independent improvements, no code coupling, batched into a single release fo
 
 ## Release merge acceptance criteria
 
-- [ ] Both PRs merged into `release/v0.4.1`.
+- [x] Both PRs merged into `release/v0.4.1`.
 - [ ] `CHANGELOG.md` `[0.4.1]` entry added with `### Added` (#28) and `### Changed` (#27) sections.
 - [ ] `release/v0.4.1` merged to `main` (user-authorized).
 - [ ] `v0.4.1` git tag (user-authorized, not agent-driven).

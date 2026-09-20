@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-20
+
+### Added
+
+- **Configurable data directory via `RAVEN_DATA_DIR` and `--data-dir` (issue #28 / PR #33)** — global CLI flag and environment variable override the default `~/.config/raven/` location. Useful for sandboxed evals, multi-tenant pipelines, and isolated container runs where operators need per-test storage without copying files. Precedence: `--data-dir` flag > `RAVEN_DATA_DIR` env var > `os.UserConfigDir()` default. Default behavior unchanged when neither is set. Both flag forms (`--data-dir X` and `--data-dir=X`) are supported, with whitespace trimming applied. 16 new subtests cover both flag forms, end-of-args edge cases, whitespace trim, and the full precedence matrix. Windows PowerShell resolution documented in `docs/integrations/open-webui.md` alongside the existing macOS/Linux bash block. `internal/app/paths.go` required no changes — path helpers already accept an arbitrary `configDir` parameter, so the override applies transparently through every existing CLI subcommand and the dashboard TUI.
+
+### Changed
+
+- **Drop redundant `raven_` prefix from MCP tool names (issue #27 / PR #32)** — the seven MCP tool constants are now exposed without the redundant prefix: `list_cis`, `record_event`, `get_timeline`, `get_ci`, `resolve_ci_ref`, `get_ci_metadata`, `set_ci_metadata`. Operators who connect an MCP client that auto-prefixes tool names by server name (e.g. Open WebUI) will now see clean names instead of `raven_raven_list_cis`-style double-prefixing. Slice 4 of v0.4.0 (PR #31) shipped with the old prefix; this release cleans it up retroactively. 8 files updated: 1 source file (`internal/mcp/server.go`), 1 test file (`internal/mcp/server_test.go`, including a new `TestToolNameConstants_NoPrefix` defensive test), 5 docs, 1 skill. Inline error strings in `readableRecordEventError` now use `ToolRecordEvent + ...` concatenation instead of hardcoded literals for consistency. **Breaking change for any MCP client with cached tool references** — operators must refresh the tool list in their MCP client config (e.g. re-add the server in Open WebUI's persistent tool registry) after upgrading to v0.4.1.
+
 ## [0.4.0] - 2026-09-20
 
 ### Added
