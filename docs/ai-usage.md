@@ -8,14 +8,14 @@ Use the simplest Raven surface that fits the producer. The shared operational co
 
 | Situation | Use |
 | --- | --- |
-| MCP-compatible AI agent | `raven mcp` and the `raven_*` MCP tools |
+| MCP-compatible AI agent | `raven mcp` and the MCP tools |
 | Gemini CLI or Antigravity project setup | Project MCP config plus `GEMINI.md`/`AGENTS.md` Raven instructions |
 | Codex project setup | Repository `AGENTS.md` Raven instructions; optional trusted `.codex/config.toml` for project doc-loading settings |
 | Ollama local model | Project Modelfile `SYSTEM` prompt or wrapper that injects Raven rules; Ollama does not read project `.md` instructions itself |
 | Human or AI has freeform text | `raven event capture <ci-id> --source <agent> --text "..."` |
 | Adapter already has normalized event JSON | `raven event ingest --source <system> --file alert.json` |
 | Need to create the CI first | `raven ci add --ci-id ... --category ... --model ...` |
-| Need prior context | `raven timeline <ci-id>` or MCP `raven_get_timeline` |
+| Need prior context | `raven timeline <ci-id>` or MCP `get_timeline` |
 | Need to configure local AI integrations | `raven setup` from the repository root, then review/apply the setup plan |
 
 ## Core rules
@@ -41,15 +41,17 @@ Initial tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `raven_resolve_ci_ref` | Resolve `source + type + value` to canonical Raven `ci_id`. |
-| `raven_record_event` | Record an event with either canonical `ci_id` or a `ci_ref` alias object. |
-| `raven_get_timeline` | Read timeline events for a canonical CI. |
-| `raven_list_cis` | List known CIs; accepts optional `category`, `prefix`, `query`, and `limit` filters (see below). |
-| `raven_get_ci` | Read one CI by canonical ID. |
+| `resolve_ci_ref` | Resolve `source + type + value` to canonical Raven `ci_id`. |
+| `record_event` | Record an event with either canonical `ci_id` or a `ci_ref` alias object. |
+| `get_timeline` | Read timeline events for a canonical CI. |
+| `list_cis` | List known CIs; accepts optional `category`, `prefix`, `query`, and `limit` filters (see below). |
+| `get_ci` | Read one CI by canonical ID. |
+| `get_ci_metadata` | Read the metadata sidecar entry for one canonical Raven CI; returns an empty entry (no error) when none exists. |
+| `set_ci_metadata` | Upsert a metadata sidecar entry (attributes and/or relationships) with REPLACE semantics. |
 
-`raven_record_event` follows the same identity rule as CLI ingest: use `ci_id` only when it is already a Raven canonical ID; otherwise pass upstream identifiers as `ci_ref`.
+`record_event` follows the same identity rule as CLI ingest: use `ci_id` only when it is already a Raven canonical ID; otherwise pass upstream identifiers as `ci_ref`.
 
-`raven_list_cis` accepts four optional filter parameters that compose with AND semantics. Omit them (or pass empty values) to keep the default unfiltered behavior.
+`list_cis` accepts four optional filter parameters that compose with AND semantics. Omit them (or pass empty values) to keep the default unfiltered behavior.
 
 - `category` (string): exact-match filter on `Component.Category` (for example `network`, `hardware`).
 - `prefix` (string): case-sensitive prefix filter on `ci_id` (for example `TWR-`).
@@ -153,7 +155,7 @@ raven alias list
 raven alias resolve --source next-gen --type ci_id --value 42
 ```
 
-Aliases are stored in `~/.config/raven/aliases.json`. The unique key is `source + type + value`; Raven rejects unknown canonical CIs and duplicate or conflicting mappings. Alias values are exact-match after trimming whitespace, so adapters should pass a consistent hostname, MAC, IP, serial, or upstream ID format.
+Aliases are stored in `~/.config/raven/aliases.json` (overridable via the `--data-dir` global CLI flag or the `RAVEN_DATA_DIR` environment variable; see [Storage paths](integrations/open-webui.md#step-2--confirm-local-storage-paths) for details). The unique key is `source + type + value`; Raven rejects unknown canonical CIs and duplicate or conflicting mappings. Alias values are exact-match after trimming whitespace, so adapters should pass a consistent hostname, MAC, IP, serial, or upstream ID format.
 
 ## Current limitations
 

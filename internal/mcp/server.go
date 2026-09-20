@@ -18,13 +18,13 @@ import (
 )
 
 const (
-	ToolResolveCIRef  = "raven_resolve_ci_ref"
-	ToolRecordEvent   = "raven_record_event"
-	ToolGetTimeline   = "raven_get_timeline"
-	ToolListCIs       = "raven_list_cis"
-	ToolGetCI         = "raven_get_ci"
-	ToolGetCIMetadata = "raven_get_ci_metadata"
-	ToolSetCIMetadata = "raven_set_ci_metadata"
+	ToolResolveCIRef  = "resolve_ci_ref"
+	ToolRecordEvent   = "record_event"
+	ToolGetTimeline   = "get_timeline"
+	ToolListCIs       = "list_cis"
+	ToolGetCI         = "get_ci"
+	ToolGetCIMetadata = "get_ci_metadata"
+	ToolSetCIMetadata = "set_ci_metadata"
 )
 
 type ServerConfig struct {
@@ -181,13 +181,13 @@ func registerTools(srv *mcpserver.MCPServer, svc service.Service) {
 	), handleSetCIMetadata(svc))
 }
 
-// setCIMetadataArgs is the input schema for raven_set_ci_metadata. Each field
+// setCIMetadataArgs is the input schema for set_ci_metadata. Each field
 // is a pointer so the handler can distinguish "omit" (preserve existing) from
 // "empty" (clear) in the underlying sidecar.
 type setCIMetadataArgs struct {
-	CIID          string                           `json:"ci_id"`
-	Attributes    *map[string]domain.TypedValue    `json:"attributes,omitempty"`
-	Relationships *[]domain.CIRelationship         `json:"relationships,omitempty"`
+	CIID          string                        `json:"ci_id"`
+	Attributes    *map[string]domain.TypedValue `json:"attributes,omitempty"`
+	Relationships *[]domain.CIRelationship      `json:"relationships,omitempty"`
 }
 
 func ciRefSchemaProperties() map[string]any {
@@ -330,9 +330,9 @@ func handleSetCIMetadata(svc service.Service) mcpserver.ToolHandlerFunc {
 func readableRecordEventError(err error) string {
 	switch {
 	case errors.Is(err, service.ErrMissingEventIdentity):
-		return "raven_record_event requires ci_id or ci_ref"
+		return ToolRecordEvent + " requires ci_id or ci_ref"
 	case errors.Is(err, service.ErrMissingEventDedup):
-		return "raven_record_event requires external_id or dedup_key"
+		return ToolRecordEvent + " requires external_id or dedup_key"
 	default:
 		return err.Error()
 	}
