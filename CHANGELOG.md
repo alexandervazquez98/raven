@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-20
+
+### Added
+
+- **Metadata sidecar at `~/.config/raven/metadata.json` (issue #23)** — optional, opt-in sidecar for typed attributes and topological relationships per CI. Keeps `domain.Component` immutable; CIs that don't need metadata never see or pay for it. Implements Option D as approved in the maintainer consensus comment. Verified end-to-end against the NetOps Orchestrator LLM (Qwen 3.5 9B + NORA RF telemetry on Cambium PMP 450i): 5/5 multi-turn reasoning gates PASS across all four slices.
+
+  - **Slice 1 (PR #26)**: domain types in `internal/domain/metadata.go` — `MetadataSidecar`, `CIMetadataEntry`, `TypedValue` (sum type: `string | number | bool | enum`), `CIRelationship`; `Validate()` methods with sentinel errors (`ErrInvalidTypedValue`, `ErrMissingAttributeKey`, `ErrMissingRelationshipTargetCIID`, `ErrMissingRelationshipKind`, `ErrSelfReferentialRelationship`, `ErrUnsupportedSidecarVersion`); reuses shared `ErrDuplicateCIID`. Public constructors `StringValue`/`NumberValue`/`BoolValue`/`EnumValue` and `Raw() any` accessor on `TypedValue`. Per-entry validation; `ci_id` uniqueness across the sidecar; rejection of self-referential relationships.
+
+  - **Slice 2 (PR #29)**: storage helpers `SaveMetadata` and `LoadMetadata` in `internal/storage/metadata.go`, mirroring `SaveComponents`/`LoadComponents`. Snake_case JSON with `0o600` perms, `0o755` parent dirs, `MetadataSidecarVersion = 1` schema version. Missing file returns an empty sidecar pinned to the current version. 10 unit tests covering roundtrip, parent-dir creation, tag discipline, missing file, invalid JSON, validation, unsupported version, duplicate ci_id, self-referential relationship.
+
+  - **Slice 3 (PR #30)**: CLI commands — `raven metadata add --ci-id <id> [--attribute "k=v,k=v"] [--relationship "target=kind,target=kind"]` (upsert with MERGE semantics; attribute keys overwrite by key, relationships append), `raven metadata list [--limit N]` (tabular summary), `raven metadata show <ci-id>` (human-readable dump). Attribute values auto-type: `true`/`false` → BoolValue, parseable as float → NumberValue, else StringValue. New `app.MetadataPath` and a `loadMetadata` helper in `internal/cli/cli.go`. 14 tests + 6 sub-tests.
+
+  - **Slice 4 (PR #31)**: MCP tools — `raven_get_ci_metadata(ci_id)` (read-only, idempotent; returns empty entry when no metadata exists) and `raven_set_ci_metadata(ci_id, attributes?, relationships?)` (destructive, idempotent; REPLACE semantics — omit preserves, empty clears, non-empty sets). Service layer gains `GetCIMetadata` and `SetCIMetadata` methods using `*map`/`*slice` pointer contracts to distinguish "not provided" from "provided as empty". 22 new tests + 1 extended.
+
 ## [0.3.0] - 2026-09-20
 
 ### Added
