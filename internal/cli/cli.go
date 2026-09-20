@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +38,8 @@ func RunWithInput(args []string, configDir string, stdin io.Reader, stdout, stde
 		return runEvent(args[1:], configDir, stdin, stdout, stderr)
 	case "timeline":
 		return runTimeline(args[1:], configDir, stdout, stderr)
+	case "metadata":
+		return runMetadata(args[1:], configDir, stdout, stderr)
 	case "mcp":
 		return ravenmcp.ServeStdio(args[1:], configDir, stderr)
 	case "nextgen-mcp":
@@ -602,6 +606,266 @@ func runTimeline(args []string, configDir string, stdout, stderr io.Writer) erro
 	return nil
 }
 
+func runMetadata(args []string, configDir string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		err := errors.New("metadata subcommand is required")
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	switch args[0] {
+	case "add":
+		return runMetadataAdd(args[1:], configDir, stdout, stderr)
+	case "list":
+		return runMetadataList(args[1:], configDir, stdout, stderr)
+	case "show":
+		return runMetadataShow(args[1:], configDir, stdout, stderr)
+	default:
+		err := fmt.Errorf("unknown metadata subcommand %q", args[0])
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+}
+
+func runMetadataAdd(args []string, configDir string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("metadata add", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	ciID := flags.String("ci-id", "", "CI ID this metadata entry belongs to")
+	attribute := flags.String("attribute", "", "comma-separated key=value pairs (k1=v1,k2=v2). Values are auto-typed: 'true'/'false' -> bool, parseable as float -> number, else string.")
+	relationship := flags.String("relationship", "", "comma-separated target_ci_id=kind pairs (t1=k1,t2=k2)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		err := fmt.Errorf("metadata add does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	if strings.TrimSpace(*ciID) == "" {
+		err := errors.New("metadata add requires --ci-id")
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	sidecar, err := loadMetadata(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	// Find existing entry for ci-id; if absent, append a new one.
+	idx := -1
+	for i, entry := range sidecar.Entries {
+		if strings.TrimSpace(entry.CIID) == strings.TrimSpace(*ciID) {
+			idx = i
+			break
+		}
+	}
+	var entry domain.CIMetadataEntry
+	if idx >= 0 {
+		entry = sidecar.Entries[idx]
+	} else {
+		entry = domain.CIMetadataEntry{CIID: *ciID}
+	}
+
+	if entry.Attributes == nil {
+		entry.Attributes = map[string]domain.TypedValue{}
+	}
+
+	// Parse --attribute pairs
+	if *attribute != "" {
+		for _, pair := range strings.Split(*attribute, ",") {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			eq := strings.IndexByte(pair, '=')
+			if eq <= 0 || eq == len(pair)-1 {
+				err := fmt.Errorf("invalid --attribute entry %q: expected key=value", pair)
+				fmt.Fprintln(stderr, err)
+				return err
+			}
+			key := strings.TrimSpace(pair[:eq])
+			rawValue := pair[eq+1:]
+			if key == "" {
+				err := errors.New("--attribute has empty key")
+				fmt.Fprintln(stderr, err)
+				return err
+			}
+			entry.Attributes[key] = parseTypedValue(rawValue)
+		}
+	}
+
+	// Parse --relationship pairs
+	if *relationship != "" {
+		for _, pair := range strings.Split(*relationship, ",") {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			eq := strings.IndexByte(pair, '=')
+			if eq <= 0 || eq == len(pair)-1 {
+				err := fmt.Errorf("invalid --relationship entry %q: expected target_ci_id=kind", pair)
+				fmt.Fprintln(stderr, err)
+				return err
+			}
+			target := strings.TrimSpace(pair[:eq])
+			kind := strings.TrimSpace(pair[eq+1:])
+			if target == "" || kind == "" {
+				err := fmt.Errorf("--relationship pair %q has empty target or kind", pair)
+				fmt.Fprintln(stderr, err)
+				return err
+			}
+			entry.Relationships = append(entry.Relationships, domain.CIRelationship{
+				TargetCIID: target,
+				Kind:       kind,
+			})
+		}
+	}
+
+	// Upsert: replace or append the entry.
+	if idx >= 0 {
+		sidecar.Entries[idx] = entry
+	} else {
+		sidecar.Entries = append(sidecar.Entries, entry)
+	}
+
+	if err := storage.SaveMetadata(app.MetadataPath(configDir), sidecar); err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	fmt.Fprintf(stdout, "updated metadata for %s\n", strings.TrimSpace(*ciID))
+	return nil
+}
+
+// parseTypedValue auto-detects the TypedValue shape from a raw string value.
+// 'true'/'false' (case-insensitive) -> BoolValue; parseable as float64 ->
+// NumberValue; otherwise -> StringValue.
+func parseTypedValue(raw string) domain.TypedValue {
+	raw = strings.TrimSpace(raw)
+	switch strings.ToLower(raw) {
+	case "true":
+		return domain.BoolValue(true)
+	case "false":
+		return domain.BoolValue(false)
+	}
+	if n, err := strconv.ParseFloat(raw, 64); err == nil {
+		return domain.NumberValue(n)
+	}
+	return domain.StringValue(raw)
+}
+
+func runMetadataList(args []string, configDir string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("metadata list", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	limit := flags.Int("limit", 0, "maximum number of entries to print (0 or negative means no cap)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		err := errors.New("metadata list does not accept positional arguments")
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	sidecar, err := loadMetadata(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	if len(sidecar.Entries) == 0 {
+		fmt.Fprintln(stdout, "No metadata yet.")
+		return nil
+	}
+
+	fmt.Fprintln(stdout, "CI ID\tAttributes\tRelationships")
+	printed := 0
+	for _, entry := range sidecar.Entries {
+		if *limit > 0 && printed >= *limit {
+			break
+		}
+		fmt.Fprintf(stdout, "%s\t%d\t%d\n",
+			strings.TrimSpace(entry.CIID),
+			len(entry.Attributes),
+			len(entry.Relationships),
+		)
+		printed++
+	}
+	return nil
+}
+
+func runMetadataShow(args []string, configDir string, stdout, stderr io.Writer) error {
+	if len(args) != 1 {
+		err := errors.New("metadata show requires exactly one positional argument: <ci-id>")
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	ciID := strings.TrimSpace(args[0])
+
+	sidecar, err := loadMetadata(configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	var found *domain.CIMetadataEntry
+	for i := range sidecar.Entries {
+		if strings.TrimSpace(sidecar.Entries[i].CIID) == ciID {
+			found = &sidecar.Entries[i]
+			break
+		}
+	}
+	if found == nil {
+		err := fmt.Errorf("no metadata found for CI %q", ciID)
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+
+	fmt.Fprintf(stdout, "CI ID: %s\n", ciID)
+
+	if len(found.Attributes) == 0 && len(found.Relationships) == 0 {
+		fmt.Fprintln(stdout, "  (no attributes or relationships)")
+		return nil
+	}
+
+	if len(found.Attributes) > 0 {
+		fmt.Fprintln(stdout, "Attributes:")
+		// Stable iteration order via sort.Strings on keys.
+		keys := make([]string, 0, len(found.Attributes))
+		for k := range found.Attributes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(stdout, "  %s = %s\n", k, formatTypedValue(found.Attributes[k]))
+		}
+	}
+
+	if len(found.Relationships) > 0 {
+		fmt.Fprintln(stdout, "Relationships:")
+		for _, rel := range found.Relationships {
+			fmt.Fprintf(stdout, "  %s -> %s\n", rel.TargetCIID, rel.Kind)
+		}
+	}
+	return nil
+}
+
+// formatTypedValue renders a TypedValue as a string for CLI output.
+func formatTypedValue(v domain.TypedValue) string {
+	switch raw := v.Raw().(type) {
+	case bool:
+		return strconv.FormatBool(raw)
+	case float64:
+		return strconv.FormatFloat(raw, 'g', -1, 64)
+	case string:
+		return raw
+	default:
+		return ""
+	}
+}
+
 func firstLine(text string) string {
 	text = strings.TrimSpace(text)
 	if index := strings.IndexByte(text, '\n'); index >= 0 {
@@ -638,4 +902,12 @@ func loadAliasRegistry(configDir string) ([]domain.Alias, *domain.AliasRegistry,
 		}
 	}
 	return aliases, registry, nil
+}
+
+func loadMetadata(configDir string) (domain.MetadataSidecar, error) {
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(configDir))
+	if err != nil {
+		return domain.MetadataSidecar{}, err
+	}
+	return sidecar, nil
 }

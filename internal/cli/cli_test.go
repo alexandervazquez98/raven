@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"raven/internal/app"
+	"raven/internal/domain"
 	"raven/internal/storage"
 )
 
@@ -1133,5 +1134,417 @@ func TestRunNextGenMCPRejectsUnexpectedArguments(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "nextgen-mcp does not accept arguments: extra") {
 		t.Fatalf("stderr = %q, want nextgen-mcp argument error", stderr.String())
+	}
+}
+
+func seedMetadata(t *testing.T, configDir string, sidecar domain.MetadataSidecar) {
+	t.Helper()
+	if sidecar.Version == 0 {
+		sidecar.Version = domain.MetadataSidecarVersion
+	}
+	if err := storage.SaveMetadata(app.MetadataPath(configDir), sidecar); err != nil {
+		t.Fatalf("SaveMetadata() error = %v, want nil", err)
+	}
+}
+
+func TestRunMetadataAddCreatesEntry(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"metadata", "add", "--ci-id", "FW-MAIN-001", "--attribute", "azimuth_deg=12.5,monitored=true,label=primary", "--relationship", "RAVEN-CORE-RTR-01=runs-on,RAVEN-RACK-A01=located-at"}, configDir, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Run(metadata add) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "updated metadata for FW-MAIN-001") {
+		t.Fatalf("stdout = %q, want update confirmation", stdout.String())
+	}
+
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadMetadata() error = %v, want nil", err)
+	}
+	if len(sidecar.Entries) != 1 {
+		t.Fatalf("entries length = %d, want 1", len(sidecar.Entries))
+	}
+	entry := sidecar.Entries[0]
+	if entry.CIID != "FW-MAIN-001" {
+		t.Fatalf("entry CIID = %q, want FW-MAIN-001", entry.CIID)
+	}
+	if len(entry.Attributes) != 3 {
+		t.Fatalf("attributes length = %d, want 3", len(entry.Attributes))
+	}
+	if v, ok := entry.Attributes["azimuth_deg"]; !ok || v.Raw() != 12.5 {
+		t.Fatalf("azimuth_deg = %#v, want NumberValue(12.5)", v)
+	}
+	if v, ok := entry.Attributes["monitored"]; !ok || v.Raw() != true {
+		t.Fatalf("monitored = %#v, want BoolValue(true)", v)
+	}
+	if v, ok := entry.Attributes["label"]; !ok || v.Raw() != "primary" {
+		t.Fatalf("label = %#v, want StringValue(primary)", v)
+	}
+	if len(entry.Relationships) != 2 {
+		t.Fatalf("relationships length = %d, want 2", len(entry.Relationships))
+	}
+	wantRels := map[string]string{"RAVEN-CORE-RTR-01": "runs-on", "RAVEN-RACK-A01": "located-at"}
+	for _, rel := range entry.Relationships {
+		want, ok := wantRels[rel.TargetCIID]
+		if !ok {
+			t.Fatalf("unexpected relationship target %q", rel.TargetCIID)
+		}
+		if rel.Kind != want {
+			t.Fatalf("relationship %q kind = %q, want %q", rel.TargetCIID, rel.Kind, want)
+		}
+	}
+}
+
+func TestRunMetadataAddMergesIntoExistingEntry(t *testing.T) {
+	configDir := t.TempDir()
+	seedMetadata(t, configDir, domain.MetadataSidecar{
+		Entries: []domain.CIMetadataEntry{
+			{
+				CIID: "FW-MAIN-001",
+				Attributes: map[string]domain.TypedValue{
+					"azimuth_deg": domain.NumberValue(12.5),
+					"label":       domain.StringValue("primary"),
+				},
+				Relationships: []domain.CIRelationship{{TargetCIID: "RAVEN-RACK-A01", Kind: "located-at"}},
+			},
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := Run([]string{"metadata", "add", "--ci-id", "FW-MAIN-001", "--attribute", "label=edge,monitored=true", "--relationship", "RAVEN-CORE-RTR-01=runs-on"}, configDir, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Run(metadata add merge) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadMetadata() error = %v, want nil", err)
+	}
+	if len(sidecar.Entries) != 1 {
+		t.Fatalf("entries length = %d, want 1 after merge", len(sidecar.Entries))
+	}
+	entry := sidecar.Entries[0]
+	if v, ok := entry.Attributes["azimuth_deg"]; !ok || v.Raw() != 12.5 {
+		t.Fatalf("azimuth_deg = %#v, want preserved NumberValue(12.5)", v)
+	}
+	if v, ok := entry.Attributes["label"]; !ok || v.Raw() != "edge" {
+		t.Fatalf("label = %#v, want overwritten StringValue(edge)", v)
+	}
+	if v, ok := entry.Attributes["monitored"]; !ok || v.Raw() != true {
+		t.Fatalf("monitored = %#v, want new BoolValue(true)", v)
+	}
+	if len(entry.Relationships) != 2 {
+		t.Fatalf("relationships length = %d, want 2 after merge", len(entry.Relationships))
+	}
+}
+
+func TestRunMetadataAddRejectsMissingCIID(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"metadata", "add", "--attribute", "label=primary"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(metadata add no ci-id) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "metadata add requires --ci-id") {
+		t.Fatalf("stderr = %q, want missing ci-id error", stderr.String())
+	}
+
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadMetadata() error = %v, want nil", err)
+	}
+	if len(sidecar.Entries) != 0 {
+		t.Fatalf("entries length = %d, want 0 after rejected add", len(sidecar.Entries))
+	}
+}
+
+func TestRunMetadataAddRejectsMalformedAttribute(t *testing.T) {
+	configDir := t.TempDir()
+	tests := []struct {
+		name      string
+		attribute string
+	}{
+		{name: "no value", attribute: "novalue"},
+		{name: "empty key", attribute: "=value"},
+		{name: "trailing equals", attribute: "label="},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			err := Run([]string{"metadata", "add", "--ci-id", "FW-MAIN-001", "--attribute", tt.attribute}, configDir, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Run(metadata add malformed attr) error = nil, want error")
+			}
+			if !strings.Contains(stderr.String(), "invalid --attribute entry") && !strings.Contains(stderr.String(), "--attribute has empty key") {
+				t.Fatalf("stderr = %q, want malformed attribute error", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunMetadataAddRejectsMalformedRelationship(t *testing.T) {
+	configDir := t.TempDir()
+	tests := []struct {
+		name         string
+		relationship string
+	}{
+		{name: "no kind", relationship: "RAVEN-CORE-RTR-01"},
+		{name: "empty target", relationship: "=runs-on"},
+		{name: "trailing equals", relationship: "RAVEN-CORE-RTR-01="},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			err := Run([]string{"metadata", "add", "--ci-id", "FW-MAIN-001", "--relationship", tt.relationship}, configDir, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Run(metadata add malformed rel) error = nil, want error")
+			}
+			if !strings.Contains(stderr.String(), "invalid --relationship entry") && !strings.Contains(stderr.String(), "--relationship pair") {
+				t.Fatalf("stderr = %q, want malformed relationship error", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunMetadataAddAutoTypesValues(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"metadata", "add", "--ci-id", "FW-MAIN-001", "--attribute", "enabled=true,disabled=false,count=45,greeting=hello"}, configDir, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Run(metadata add auto-type) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+
+	sidecar, err := storage.LoadMetadata(app.MetadataPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadMetadata() error = %v, want nil", err)
+	}
+	if len(sidecar.Entries) != 1 {
+		t.Fatalf("entries length = %d, want 1", len(sidecar.Entries))
+	}
+	entry := sidecar.Entries[0]
+	want := map[string]any{
+		"enabled":  true,
+		"disabled": false,
+		"count":    float64(45),
+		"greeting": "hello",
+	}
+	if len(entry.Attributes) != len(want) {
+		t.Fatalf("attributes length = %d, want %d", len(entry.Attributes), len(want))
+	}
+	for key, expected := range want {
+		got, ok := entry.Attributes[key]
+		if !ok {
+			t.Fatalf("missing attribute %q", key)
+		}
+		if got.Raw() != expected {
+			t.Fatalf("attribute %q raw = %#v, want %#v", key, got.Raw(), expected)
+		}
+	}
+}
+
+func TestRunMetadataListEmpty(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if err := Run([]string{"metadata", "list"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(metadata list empty) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "No metadata yet.") {
+		t.Fatalf("stdout = %q, want empty metadata message", stdout.String())
+	}
+}
+
+func TestRunMetadataListPrintsTabularSummary(t *testing.T) {
+	configDir := t.TempDir()
+	seedMetadata(t, configDir, domain.MetadataSidecar{
+		Entries: []domain.CIMetadataEntry{
+			{
+				CIID: "FW-MAIN-001",
+				Attributes: map[string]domain.TypedValue{
+					"azimuth_deg": domain.NumberValue(12.5),
+					"label":       domain.StringValue("primary"),
+				},
+				Relationships: []domain.CIRelationship{{TargetCIID: "RAVEN-RACK-A01", Kind: "located-at"}},
+			},
+			{
+				CIID:          "SRV-DB-001",
+				Attributes:    map[string]domain.TypedValue{"rack": domain.StringValue("A01")},
+				Relationships: []domain.CIRelationship{{TargetCIID: "FW-MAIN-001", Kind: "behind"}, {TargetCIID: "RAVEN-RACK-A01", Kind: "located-at"}},
+			},
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"metadata", "list"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(metadata list) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	for _, want := range []string{"CI ID\tAttributes\tRelationships", "FW-MAIN-001\t2\t1", "SRV-DB-001\t1\t2"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+		}
+	}
+}
+
+func TestRunMetadataListAppliesLimit(t *testing.T) {
+	configDir := t.TempDir()
+	seedMetadata(t, configDir, domain.MetadataSidecar{
+		Entries: []domain.CIMetadataEntry{
+			{CIID: "FW-MAIN-001", Attributes: map[string]domain.TypedValue{"label": domain.StringValue("a")}},
+			{CIID: "FW-BACKUP-001", Attributes: map[string]domain.TypedValue{"label": domain.StringValue("b")}},
+			{CIID: "FW-DR-001", Attributes: map[string]domain.TypedValue{"label": domain.StringValue("c")}},
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"metadata", "list", "--limit", "2"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(metadata list --limit) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	rows := 0
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if strings.HasPrefix(line, "FW-MAIN-001") || strings.HasPrefix(line, "FW-BACKUP-001") || strings.HasPrefix(line, "FW-DR-001") {
+			rows++
+		}
+	}
+	if rows != 2 {
+		t.Fatalf("stdout rows under limit = %d, want 2; stdout=%q", rows, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "FW-DR-001") {
+		t.Fatalf("stdout = %q, did not want FW-DR-001 beyond limit", stdout.String())
+	}
+}
+
+func TestRunMetadataListRejectsPositionalArgs(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"metadata", "list", "extra"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(metadata list extra) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "metadata list does not accept positional arguments") {
+		t.Fatalf("stderr = %q, want positional arg error", stderr.String())
+	}
+}
+
+func TestRunMetadataShowPrintsEntry(t *testing.T) {
+	configDir := t.TempDir()
+	seedMetadata(t, configDir, domain.MetadataSidecar{
+		Entries: []domain.CIMetadataEntry{
+			{
+				CIID: "FW-MAIN-001",
+				Attributes: map[string]domain.TypedValue{
+					"azimuth_deg": domain.NumberValue(12.5),
+					"label":       domain.StringValue("primary"),
+					"monitored":   domain.BoolValue(true),
+				},
+				Relationships: []domain.CIRelationship{
+					{TargetCIID: "RAVEN-RACK-A01", Kind: "located-at"},
+					{TargetCIID: "RAVEN-CORE-RTR-01", Kind: "runs-on"},
+				},
+			},
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"metadata", "show", "FW-MAIN-001"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(metadata show) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	for _, want := range []string{
+		"CI ID: FW-MAIN-001",
+		"Attributes:",
+		"azimuth_deg = 12.5",
+		"label = primary",
+		"monitored = true",
+		"Relationships:",
+		"RAVEN-RACK-A01 -> located-at",
+		"RAVEN-CORE-RTR-01 -> runs-on",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+		}
+	}
+}
+
+func TestRunMetadataShowRequiresCIID(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"metadata", "show"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(metadata show without ci-id) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "metadata show requires exactly one positional argument") {
+		t.Fatalf("stderr = %q, want ci-id requirement error", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	err = Run([]string{"metadata", "show", "FW-MAIN-001", "extra"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(metadata show two positionals) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), "metadata show requires exactly one positional argument") {
+		t.Fatalf("stderr = %q, want ci-id requirement error", stderr.String())
+	}
+}
+
+func TestRunMetadataShowUnknownCIID(t *testing.T) {
+	configDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run([]string{"metadata", "show", "MISSING"}, configDir, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run(metadata show unknown) error = nil, want error")
+	}
+	if !strings.Contains(stderr.String(), `no metadata found for CI "MISSING"`) {
+		t.Fatalf("stderr = %q, want unknown ci-id error", stderr.String())
+	}
+}
+
+func TestRunMetadataShowEmptyEntry(t *testing.T) {
+	configDir := t.TempDir()
+	seedMetadata(t, configDir, domain.MetadataSidecar{
+		Entries: []domain.CIMetadataEntry{
+			{CIID: "FW-MAIN-001"},
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := Run([]string{"metadata", "show", "FW-MAIN-001"}, configDir, &stdout, &stderr); err != nil {
+		t.Fatalf("Run(metadata show empty) error = %v, want nil; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "CI ID: FW-MAIN-001") {
+		t.Fatalf("stdout = %q, want ci-id line", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "(no attributes or relationships)") {
+		t.Fatalf("stdout = %q, want empty placeholder", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Attributes:") {
+		t.Fatalf("stdout = %q, did not want Attributes section", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Relationships:") {
+		t.Fatalf("stdout = %q, did not want Relationships section", stdout.String())
 	}
 }
