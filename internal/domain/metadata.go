@@ -14,6 +14,7 @@ var (
 	ErrMissingAttributeKey           = errors.New("attribute key is required")
 	ErrMissingRelationshipTargetCIID = errors.New("relationship target_ci_id is required")
 	ErrMissingRelationshipKind       = errors.New("relationship kind is required")
+	ErrSelfReferentialRelationship   = errors.New("relationship cannot target its own ci_id")
 	ErrUnsupportedSidecarVersion     = errors.New("unsupported sidecar version")
 )
 
@@ -25,6 +26,35 @@ type TypedValue struct {
 	Number *float64 `json:"number,omitempty"`
 	Bool   *bool    `json:"bool,omitempty"`
 	Enum   *string  `json:"enum,omitempty"`
+}
+
+// StringValue constructs a TypedValue holding a string.
+func StringValue(s string) TypedValue { return TypedValue{String: &s} }
+
+// NumberValue constructs a TypedValue holding a float64.
+func NumberValue(n float64) TypedValue { return TypedValue{Number: &n} }
+
+// BoolValue constructs a TypedValue holding a bool.
+func BoolValue(b bool) TypedValue { return TypedValue{Bool: &b} }
+
+// EnumValue constructs a TypedValue holding a string-enum value.
+func EnumValue(e string) TypedValue { return TypedValue{Enum: &e} }
+
+// Raw returns the underlying scalar value of v as `any`. Returns nil if v has
+// zero or multiple fields set (caller should Validate() first).
+func (v TypedValue) Raw() any {
+	switch {
+	case v.String != nil:
+		return *v.String
+	case v.Number != nil:
+		return *v.Number
+	case v.Bool != nil:
+		return *v.Bool
+	case v.Enum != nil:
+		return *v.Enum
+	default:
+		return nil
+	}
 }
 
 // Validate ensures exactly one field is set.
@@ -77,7 +107,8 @@ type CIMetadataEntry struct {
 }
 
 // Validate enforces non-empty ci_id, non-empty attribute keys, valid TypedValue
-// per attribute, and valid CIRelationship per relationship.
+// per attribute, no self-referential relationships, and valid CIRelationship
+// per relationship.
 func (e CIMetadataEntry) Validate() error {
 	if strings.TrimSpace(e.CIID) == "" {
 		return ErrMissingCIID
@@ -90,7 +121,11 @@ func (e CIMetadataEntry) Validate() error {
 			return err
 		}
 	}
+	ciID := strings.TrimSpace(e.CIID)
 	for _, rel := range e.Relationships {
+		if strings.TrimSpace(rel.TargetCIID) == ciID {
+			return ErrSelfReferentialRelationship
+		}
 		if err := rel.Validate(); err != nil {
 			return err
 		}
@@ -104,15 +139,22 @@ type MetadataSidecar struct {
 	Entries []CIMetadataEntry `json:"entries"`
 }
 
-// Validate enforces the schema version and validates every entry.
+// Validate enforces the schema version, then validates every entry, then
+// ensures ci_id uniqueness across all entries.
 func (s MetadataSidecar) Validate() error {
 	if s.Version != MetadataSidecarVersion {
 		return ErrUnsupportedSidecarVersion
 	}
+	seen := make(map[string]struct{}, len(s.Entries))
 	for _, entry := range s.Entries {
 		if err := entry.Validate(); err != nil {
 			return err
 		}
+		ciID := strings.TrimSpace(entry.CIID)
+		if _, exists := seen[ciID]; exists {
+			return ErrDuplicateCIID
+		}
+		seen[ciID] = struct{}{}
 	}
 	return nil
 }
