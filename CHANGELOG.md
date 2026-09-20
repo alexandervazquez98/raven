@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-20
+
+### Added
+
+- **Optional filtering on `raven ci list` and `raven_list_cis` (issue #24 / PR #25)** —
+  CLI command `raven ci list` gains four optional flags: `--category` (exact
+  match), `--prefix` (case-sensitive prefix on `ci_id`), `--query`
+  (case-insensitive substring across `ci_id`, `model`, and `notes`), and
+  `--limit` (cap results after filtering). The MCP `raven_list_cis` tool
+  schema gains the same four optional parameters. Backed by the new
+  `service.ListFilter` struct and `Service.ListCIsWithFilter` method; the
+  existing `Service.ListCIs` is preserved. Filters compose with AND. Empty
+  filter values mean "no filter". Default no-arg behavior is byte-identical
+  to v0.2.0.
+
 ## [0.2.0] - 2026-09-12
 
 ### Added
