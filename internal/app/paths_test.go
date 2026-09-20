@@ -34,3 +34,13 @@ func TestAliasesPathUsesUserConfigDir(t *testing.T) {
 		t.Fatalf("AliasesPath() = %q, want %q", got, want)
 	}
 }
+
+func TestMetadataPathUsesUserConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+
+	got := MetadataPath(configDir)
+	want := filepath.Join(configDir, "raven", "metadata.json")
+	if got != want {
+		t.Fatalf("MetadataPath() = %q, want %q", got, want)
+	}
+}

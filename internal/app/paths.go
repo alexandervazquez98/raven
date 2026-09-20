@@ -13,3 +13,7 @@ func EventsPath(configDir string) string {
 func AliasesPath(configDir string) string {
 	return filepath.Join(configDir, "raven", "aliases.json")
 }
+
+func MetadataPath(configDir string) string {
+	return filepath.Join(configDir, "raven", "metadata.json")
+}
