@@ -270,9 +270,9 @@ Skill flow:
 
 ```text
 nextgen_get_event(event_id)
-→ raven_resolve_ci_ref(source="next-gen", type="ci_id", value=event.ci_ref.id)
-→ raven_get_timeline(ci_id=<canonical Raven CI>)
-→ raven_record_event(...)
+→ resolve_ci_ref(source="next-gen", type="ci_id", value=event.ci_ref.id)
+→ get_timeline(ci_id=<canonical Raven CI>)
+→ record_event(...)
 ```
 
 ## Normalization helper: milestone 2
@@ -323,7 +323,7 @@ If no canonical Raven ID is known, emit `ci_ref` instead:
 
 ## Raw/redaction policy before Raven persistence
 
-Milestone 1 candidate generation is read-only. Before an agent calls `raven_record_event` or `raven event ingest`, it must reduce the candidate to operator-safe evidence.
+Milestone 1 candidate generation is read-only. Before an agent calls `record_event` or `raven event ingest`, it must reduce the candidate to operator-safe evidence.
 
 Persist by default:
 

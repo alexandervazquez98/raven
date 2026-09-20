@@ -186,8 +186,8 @@ func TestMCPListCIsFilters(t *testing.T) {
 	tools := srv.ListTools()
 
 	type wantSet struct {
-		ids     []string
-		absent  []string
+		ids    []string
+		absent []string
 	}
 	tests := []struct {
 		name string
@@ -594,6 +594,23 @@ func TestMCPSetCIMetadataReturnsErrorOnMissingCIID(t *testing.T) {
 	}
 	if !strings.Contains(resultText(result), "ci id") {
 		t.Fatalf("set error text = %q, want mention of ci id", resultText(result))
+	}
+}
+
+func TestToolNameConstants_NoPrefix(t *testing.T) {
+	cases := []struct{ got, want string }{
+		{ToolListCIs, "list_cis"},
+		{ToolRecordEvent, "record_event"},
+		{ToolGetTimeline, "get_timeline"},
+		{ToolGetCI, "get_ci"},
+		{ToolResolveCIRef, "resolve_ci_ref"},
+		{ToolGetCIMetadata, "get_ci_metadata"},
+		{ToolSetCIMetadata, "set_ci_metadata"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("tool constant = %q, want %q", c.got, c.want)
+		}
 	}
 }
 

@@ -42,11 +42,13 @@ The skill should think in terms of small tools/actions, even when the first impl
 
 | Skill action | MCP tool | CLI fallback | Purpose |
 | --- | --- | --- | --- |
-| Resolve CI reference | `raven_resolve_ci_ref` | `raven alias resolve --source <source> --type <type> --value <value>` | Convert next-gen/IP/hostname/serial/MAC reference into canonical Raven `ci_id`. |
-| Read CI context | `raven_get_timeline` | `raven timeline <ci-id>` | Load short prior context before diagnosis or historical claims. |
-| Record event | `raven_record_event` | `raven event capture` or `raven event ingest` | Persist selected facts, diagnosis, maintenance action, resolution, or follow-up. |
-| List CIs | `raven_list_cis` | `raven ci list` | Help the user choose when identity is ambiguous. |
-| Get CI | `raven_get_ci` | `raven ci show <ci-id>` | Confirm category/model/details for a known CI. |
+| Resolve CI reference | `resolve_ci_ref` | `raven alias resolve --source <source> --type <type> --value <value>` | Convert next-gen/IP/hostname/serial/MAC reference into canonical Raven `ci_id`. |
+| Read CI context | `get_timeline` | `raven timeline <ci-id>` | Load short prior context before diagnosis or historical claims. |
+| Record event | `record_event` | `raven event capture` or `raven event ingest` | Persist selected facts, diagnosis, maintenance action, resolution, or follow-up. |
+| List CIs | `list_cis` | `raven ci list` | Help the user choose when identity is ambiguous. |
+| Get CI | `get_ci` | `raven ci show <ci-id>` | Confirm category/model/details for a known CI. |
+| Read metadata | `get_ci_metadata` | (no CLI fallback yet) | Read attributes/relationships sidecar for a known CI. |
+| Upsert metadata | `set_ci_metadata` | (no CLI fallback yet) | Replace attributes and/or relationships sidecar for a known CI. |
 
 ### Needed next-gen tools
 
