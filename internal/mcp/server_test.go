@@ -16,7 +16,7 @@ func TestNewServerRegistersAgentTools(t *testing.T) {
 	srv := NewServer(ServerConfig{ConfigDir: t.TempDir()})
 
 	got := ToolNames(srv)
-	want := []string{ToolGetCI, ToolGetTimeline, ToolListCIs, ToolRecordEvent, ToolResolveCIRef}
+	want := []string{ToolGetCI, ToolGetCIMetadata, ToolGetTimeline, ToolListCIs, ToolRecordEvent, ToolResolveCIRef, ToolSetCIMetadata}
 	if len(got) != len(want) {
 		t.Fatalf("ToolNames() = %v, want %v", got, want)
 	}
@@ -30,7 +30,7 @@ func TestNewServerRegistersAgentTools(t *testing.T) {
 	for _, name := range want {
 		assertStrictTopLevelSchema(t, tools[name].Tool)
 	}
-	for _, name := range []string{ToolResolveCIRef, ToolGetTimeline, ToolListCIs, ToolGetCI} {
+	for _, name := range []string{ToolResolveCIRef, ToolGetTimeline, ToolListCIs, ToolGetCI, ToolGetCIMetadata} {
 		assertReadOnlyLocalTool(t, tools[name].Tool)
 	}
 
@@ -78,6 +78,33 @@ func TestNewServerRegistersAgentTools(t *testing.T) {
 	}
 	assertRequiredFields(t, tools[ToolGetTimeline].Tool, "ci_id")
 	assertRequiredFields(t, tools[ToolGetCI].Tool, "ci_id")
+	assertRequiredFields(t, tools[ToolGetCIMetadata].Tool, "ci_id")
+	assertRequiredFields(t, tools[ToolSetCIMetadata].Tool, "ci_id")
+
+	setMetadataTool := tools[ToolSetCIMetadata].Tool
+	if setMetadataTool.Annotations.ReadOnlyHint == nil || *setMetadataTool.Annotations.ReadOnlyHint {
+		t.Fatalf("set_ci_metadata readOnlyHint = %v, want false", setMetadataTool.Annotations.ReadOnlyHint)
+	}
+	if setMetadataTool.Annotations.DestructiveHint == nil || !*setMetadataTool.Annotations.DestructiveHint {
+		t.Fatalf("set_ci_metadata destructiveHint = %v, want true", setMetadataTool.Annotations.DestructiveHint)
+	}
+	if setMetadataTool.Annotations.IdempotentHint == nil || !*setMetadataTool.Annotations.IdempotentHint {
+		t.Fatalf("set_ci_metadata idempotentHint = %v, want true", setMetadataTool.Annotations.IdempotentHint)
+	}
+	if setMetadataTool.Annotations.OpenWorldHint == nil || *setMetadataTool.Annotations.OpenWorldHint {
+		t.Fatalf("set_ci_metadata openWorldHint = %v, want false", setMetadataTool.Annotations.OpenWorldHint)
+	}
+	if _, ok := setMetadataTool.InputSchema.Properties["attributes"]; !ok {
+		t.Fatalf("set_ci_metadata schema missing attributes property (properties=%v)", setMetadataTool.InputSchema.Properties)
+	}
+	if _, ok := setMetadataTool.InputSchema.Properties["relationships"]; !ok {
+		t.Fatalf("set_ci_metadata schema missing relationships property (properties=%v)", setMetadataTool.InputSchema.Properties)
+	}
+	for _, required := range setMetadataTool.InputSchema.Required {
+		if required == "attributes" || required == "relationships" {
+			t.Fatalf("set_ci_metadata schema unexpectedly requires %q (required=%v)", required, setMetadataTool.InputSchema.Required)
+		}
+	}
 }
 
 func TestMCPHandlersResolveRecordAndReadTimeline(t *testing.T) {
@@ -283,6 +310,290 @@ func TestMCPHandlersReturnReadableErrors(t *testing.T) {
 	})
 	if !missingIdentity.IsError || !strings.Contains(resultText(missingIdentity), "requires ci_id or ci_ref") {
 		t.Fatalf("missing identity result = %#v text=%q, want identity error", missingIdentity, resultText(missingIdentity))
+	}
+}
+
+func TestMCPGetCIMetadataExistingEntry(t *testing.T) {
+	configDir := t.TempDir()
+	attrs := map[string]domain.TypedValue{"azimuth": domain.StringValue("north")}
+	rels := []domain.CIRelationship{{TargetCIID: "SRV-DB-001", Kind: "hosts"}}
+	if err := storage.SaveMetadata(app.MetadataPath(configDir), domain.MetadataSidecar{
+		Version: domain.MetadataSidecarVersion,
+		Entries: []domain.CIMetadataEntry{{CIID: "FW-MAIN-001", Attributes: attrs, Relationships: rels}},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() error = %v, want nil", err)
+	}
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolGetCIMetadata].Handler, map[string]any{"ci_id": "FW-MAIN-001"})
+	if result.IsError {
+		t.Fatalf("get result is error: %s", resultText(result))
+	}
+	content := result.StructuredContent.(map[string]any)
+	if got := content["ci_id"]; got != "FW-MAIN-001" {
+		t.Fatalf("get ci_id = %v, want FW-MAIN-001", got)
+	}
+	gotAttrs, ok := content["attributes"].(map[string]domain.TypedValue)
+	if !ok {
+		t.Fatalf("get attributes type = %T, want map[string]domain.TypedValue (content=%#v)", content["attributes"], content)
+	}
+	if got := gotAttrs["azimuth"]; got.String == nil || *got.String != "north" {
+		t.Fatalf("get attributes[azimuth] = %#v, want StringValue(north)", got)
+	}
+	gotRels, ok := content["relationships"].([]domain.CIRelationship)
+	if !ok {
+		t.Fatalf("get relationships type = %T, want []domain.CIRelationship (content=%#v)", content["relationships"], content)
+	}
+	if len(gotRels) != 1 || gotRels[0].TargetCIID != "SRV-DB-001" || gotRels[0].Kind != "hosts" {
+		t.Fatalf("get relationships = %#v, want seeded relationship", gotRels)
+	}
+}
+
+func TestMCPGetCIMetadataMissingReturnsEmpty(t *testing.T) {
+	configDir := t.TempDir()
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolGetCIMetadata].Handler, map[string]any{"ci_id": "FW-MAIN-001"})
+	if result.IsError {
+		t.Fatalf("get result is error: %s", resultText(result))
+	}
+	content := result.StructuredContent.(map[string]any)
+	if got := content["ci_id"]; got != "FW-MAIN-001" {
+		t.Fatalf("get ci_id = %v, want FW-MAIN-001 (echoed even when missing)", got)
+	}
+	attrs, _ := content["attributes"].(map[string]domain.TypedValue)
+	if len(attrs) != 0 {
+		t.Fatalf("get attributes = %#v, want empty", attrs)
+	}
+	rels, _ := content["relationships"].([]domain.CIRelationship)
+	if len(rels) != 0 {
+		t.Fatalf("get relationships = %#v, want empty", rels)
+	}
+}
+
+func TestMCPGetCIMetadataMissingCIIDArgs(t *testing.T) {
+	srv := NewServer(ServerConfig{ConfigDir: t.TempDir()})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolGetCIMetadata].Handler, map[string]any{})
+	if !result.IsError {
+		t.Fatalf("get result IsError = false, want true (result=%#v)", result)
+	}
+	if !strings.Contains(resultText(result), "ci_id") {
+		t.Fatalf("get error text = %q, want mention of ci_id", resultText(result))
+	}
+}
+
+func TestMCPSetCIMetadataCreatesEntry(t *testing.T) {
+	configDir := t.TempDir()
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"ci_id": "FW-MAIN-001",
+		"attributes": map[string]any{
+			"azimuth": map[string]any{"string": "north"},
+			"rssi":    map[string]any{"number": -42.0},
+		},
+		"relationships": []any{
+			map[string]any{"target_ci_id": "SRV-DB-001", "kind": "hosts"},
+		},
+	})
+	if result.IsError {
+		t.Fatalf("set result is error: %s", resultText(result))
+	}
+	content := result.StructuredContent.(map[string]any)
+	if got := content["ci_id"]; got != "FW-MAIN-001" {
+		t.Fatalf("set ci_id = %v, want FW-MAIN-001", got)
+	}
+	attrs, ok := content["attributes"].(map[string]domain.TypedValue)
+	if !ok {
+		t.Fatalf("set attributes type = %T, want map[string]domain.TypedValue (content=%#v)", content["attributes"], content)
+	}
+	if got := attrs["azimuth"]; got.String == nil || *got.String != "north" {
+		t.Fatalf("set attributes[azimuth] = %#v, want StringValue(north)", got)
+	}
+	if got := attrs["rssi"]; got.Number == nil || *got.Number != -42.0 {
+		t.Fatalf("set attributes[rssi] = %#v, want NumberValue(-42)", got)
+	}
+	rels, ok := content["relationships"].([]domain.CIRelationship)
+	if !ok {
+		t.Fatalf("set relationships type = %T, want []domain.CIRelationship (content=%#v)", content["relationships"], content)
+	}
+	if len(rels) != 1 || rels[0].TargetCIID != "SRV-DB-001" || rels[0].Kind != "hosts" {
+		t.Fatalf("set relationships = %#v, want seeded relationship", rels)
+	}
+
+	stored, err := storage.LoadMetadata(app.MetadataPath(configDir))
+	if err != nil {
+		t.Fatalf("LoadMetadata() error = %v, want nil", err)
+	}
+	if len(stored.Entries) != 1 || stored.Entries[0].CIID != "FW-MAIN-001" {
+		t.Fatalf("stored entries = %#v, want single FW-MAIN-001 entry", stored.Entries)
+	}
+}
+
+func TestMCPSetCIMetadataReplacesAttributes(t *testing.T) {
+	configDir := t.TempDir()
+	seedAttrs := map[string]domain.TypedValue{"a": domain.StringValue("x"), "b": domain.NumberValue(2)}
+	seedRels := []domain.CIRelationship{{TargetCIID: "SRV-DB-001", Kind: "hosts"}}
+	if err := storage.SaveMetadata(app.MetadataPath(configDir), domain.MetadataSidecar{
+		Version: domain.MetadataSidecarVersion,
+		Entries: []domain.CIMetadataEntry{{CIID: "FW-MAIN-001", Attributes: seedAttrs, Relationships: seedRels}},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() error = %v, want nil", err)
+	}
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"ci_id": "FW-MAIN-001",
+		"attributes": map[string]any{
+			"c": map[string]any{"bool": true},
+		},
+	})
+	if result.IsError {
+		t.Fatalf("set result is error: %s", resultText(result))
+	}
+	content := result.StructuredContent.(map[string]any)
+	attrs, ok := content["attributes"].(map[string]domain.TypedValue)
+	if !ok {
+		t.Fatalf("set attributes type = %T, want map[string]domain.TypedValue", content["attributes"])
+	}
+	if _, present := attrs["a"]; present {
+		t.Fatalf("set attributes still has a = %#v, want removed", attrs["a"])
+	}
+	if _, present := attrs["b"]; present {
+		t.Fatalf("set attributes still has b = %#v, want removed", attrs["b"])
+	}
+	if val, ok := attrs["c"]; !ok || val.Bool == nil || !*val.Bool {
+		t.Fatalf("set attributes[c] = %#v, want BoolValue(true)", val)
+	}
+	rels, ok := content["relationships"].([]domain.CIRelationship)
+	if !ok {
+		t.Fatalf("set relationships type = %T, want []domain.CIRelationship", content["relationships"])
+	}
+	if len(rels) != 1 || rels[0].TargetCIID != "SRV-DB-001" {
+		t.Fatalf("set relationships = %#v, want preserved seeded relationship", rels)
+	}
+}
+
+func TestMCPSetCIMetadataNilAttributesPreservesExisting(t *testing.T) {
+	configDir := t.TempDir()
+	seedAttrs := map[string]domain.TypedValue{"a": domain.StringValue("x")}
+	if err := storage.SaveMetadata(app.MetadataPath(configDir), domain.MetadataSidecar{
+		Version: domain.MetadataSidecarVersion,
+		Entries: []domain.CIMetadataEntry{{CIID: "FW-MAIN-001", Attributes: seedAttrs}},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() error = %v, want nil", err)
+	}
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"ci_id": "FW-MAIN-001",
+		"relationships": []any{
+			map[string]any{"target_ci_id": "SRV-DB-001", "kind": "hosts"},
+		},
+	})
+	if result.IsError {
+		t.Fatalf("set result is error: %s", resultText(result))
+	}
+	content := result.StructuredContent.(map[string]any)
+	attrs, ok := content["attributes"].(map[string]domain.TypedValue)
+	if !ok {
+		t.Fatalf("set attributes type = %T, want map[string]domain.TypedValue", content["attributes"])
+	}
+	if got := attrs["a"]; got.String == nil || *got.String != "x" {
+		t.Fatalf("set attributes[a] = %#v, want preserved StringValue(x)", got)
+	}
+	rels, ok := content["relationships"].([]domain.CIRelationship)
+	if !ok || len(rels) != 1 || rels[0].TargetCIID != "SRV-DB-001" {
+		t.Fatalf("set relationships = %#v, want seeded relationship", rels)
+	}
+}
+
+func TestMCPSetCIMetadataEmptyAttributesClears(t *testing.T) {
+	configDir := t.TempDir()
+	seedAttrs := map[string]domain.TypedValue{"a": domain.StringValue("x"), "b": domain.NumberValue(2)}
+	if err := storage.SaveMetadata(app.MetadataPath(configDir), domain.MetadataSidecar{
+		Version: domain.MetadataSidecarVersion,
+		Entries: []domain.CIMetadataEntry{{CIID: "FW-MAIN-001", Attributes: seedAttrs}},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() error = %v, want nil", err)
+	}
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"ci_id":      "FW-MAIN-001",
+		"attributes": map[string]any{},
+	})
+	if result.IsError {
+		t.Fatalf("set result is error: %s", resultText(result))
+	}
+	content := result.StructuredContent.(map[string]any)
+	attrs, ok := content["attributes"].(map[string]domain.TypedValue)
+	if !ok {
+		t.Fatalf("set attributes type = %T, want map[string]domain.TypedValue", content["attributes"])
+	}
+	if len(attrs) != 0 {
+		t.Fatalf("set attributes = %#v, want empty", attrs)
+	}
+}
+
+func TestMCPSetCIMetadataReturnsErrorOnInvalidTypedValue(t *testing.T) {
+	configDir := t.TempDir()
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"ci_id": "FW-MAIN-001",
+		"attributes": map[string]any{
+			"bad": map[string]any{"number": 1.0, "bool": true},
+		},
+	})
+	if !result.IsError {
+		t.Fatalf("set result IsError = false, want true (result=%#v)", result)
+	}
+	if !strings.Contains(resultText(result), "typed value") {
+		t.Fatalf("set error text = %q, want mention of typed value validation", resultText(result))
+	}
+}
+
+func TestMCPSetCIMetadataReturnsErrorOnSelfReferentialRelationship(t *testing.T) {
+	configDir := t.TempDir()
+	srv := NewServer(ServerConfig{ConfigDir: configDir})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"ci_id": "FW-MAIN-001",
+		"relationships": []any{
+			map[string]any{"target_ci_id": "FW-MAIN-001", "kind": "self-ref"},
+		},
+	})
+	if !result.IsError {
+		t.Fatalf("set result IsError = false, want true (result=%#v)", result)
+	}
+	if !strings.Contains(resultText(result), "own ci_id") {
+		t.Fatalf("set error text = %q, want mention of self-referential relationship", resultText(result))
+	}
+}
+
+func TestMCPSetCIMetadataReturnsErrorOnMissingCIID(t *testing.T) {
+	srv := NewServer(ServerConfig{ConfigDir: t.TempDir()})
+	tools := srv.ListTools()
+
+	result := callTool(t, tools[ToolSetCIMetadata].Handler, map[string]any{
+		"attributes": map[string]any{"a": map[string]any{"string": "x"}},
+	})
+	if !result.IsError {
+		t.Fatalf("set result IsError = false, want true (result=%#v)", result)
+	}
+	if !strings.Contains(resultText(result), "ci id") {
+		t.Fatalf("set error text = %q, want mention of ci id", resultText(result))
 	}
 }
 

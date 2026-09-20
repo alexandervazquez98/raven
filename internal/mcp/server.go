@@ -18,11 +18,13 @@ import (
 )
 
 const (
-	ToolResolveCIRef = "raven_resolve_ci_ref"
-	ToolRecordEvent  = "raven_record_event"
-	ToolGetTimeline  = "raven_get_timeline"
-	ToolListCIs      = "raven_list_cis"
-	ToolGetCI        = "raven_get_ci"
+	ToolResolveCIRef  = "raven_resolve_ci_ref"
+	ToolRecordEvent   = "raven_record_event"
+	ToolGetTimeline   = "raven_get_timeline"
+	ToolListCIs       = "raven_list_cis"
+	ToolGetCI         = "raven_get_ci"
+	ToolGetCIMetadata = "raven_get_ci_metadata"
+	ToolSetCIMetadata = "raven_set_ci_metadata"
 )
 
 type ServerConfig struct {
@@ -141,6 +143,51 @@ func registerTools(srv *mcpserver.MCPServer, svc service.Service) {
 		mcp.WithSchemaAdditionalProperties(false),
 		mcp.WithString("ci_id", mcp.Required(), mcp.Description("Canonical Raven CI ID.")),
 	), handleGetCI(svc))
+
+	srv.AddTool(mcp.NewTool(ToolGetCIMetadata,
+		mcp.WithDescription("Get the metadata sidecar entry for one canonical Raven CI ID. Returns an empty entry (no error) when the CI has no metadata yet."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+		mcp.WithSchemaAdditionalProperties(false),
+		mcp.WithString("ci_id", mcp.Required(), mcp.Description("Canonical Raven CI ID.")),
+	), handleGetCIMetadata(svc))
+
+	srv.AddTool(mcp.NewTool(ToolSetCIMetadata,
+		mcp.WithDescription("Upsert a metadata sidecar entry for one canonical Raven CI ID. Each field uses REPLACE semantics: omit a field to preserve it, supply an empty object/array to clear it, supply a non-empty value to set it."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+		mcp.WithSchemaAdditionalProperties(false),
+		mcp.WithString("ci_id", mcp.Required(), mcp.Description("Canonical Raven CI ID.")),
+		mcp.WithObject("attributes",
+			mcp.Description("Optional map of attribute name to TypedValue. Each TypedValue is one of: {\"string\": \"x\"}, {\"number\": 45}, {\"bool\": true}, {\"enum\": \"x\"}. Exactly one field per TypedValue."),
+			mcp.AdditionalProperties(true),
+		),
+		mcp.WithArray("relationships",
+			mcp.Description("Optional array of {target_ci_id, kind} pairs. Replaces all existing relationships for the CI when supplied."),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target_ci_id": map[string]any{"type": "string", "description": "Target canonical CI ID."},
+					"kind":         map[string]any{"type": "string", "description": "Relationship kind, e.g. located-at, hosts, mounted-on."},
+				},
+				"required":             []string{"target_ci_id", "kind"},
+				"additionalProperties": false,
+			}),
+		),
+	), handleSetCIMetadata(svc))
+}
+
+// setCIMetadataArgs is the input schema for raven_set_ci_metadata. Each field
+// is a pointer so the handler can distinguish "omit" (preserve existing) from
+// "empty" (clear) in the underlying sidecar.
+type setCIMetadataArgs struct {
+	CIID          string                           `json:"ci_id"`
+	Attributes    *map[string]domain.TypedValue    `json:"attributes,omitempty"`
+	Relationships *[]domain.CIRelationship         `json:"relationships,omitempty"`
 }
 
 func ciRefSchemaProperties() map[string]any {
@@ -237,6 +284,46 @@ func handleGetCI(svc service.Service) mcpserver.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultStructuredOnly(map[string]any{"ci": component}), nil
+	}
+}
+
+func handleGetCIMetadata(svc service.Service) mcpserver.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ciID, err := request.RequireString("ci_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		entry, err := svc.GetCIMetadata(ciID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultStructuredOnly(map[string]any{
+			"ci_id":         entry.CIID,
+			"attributes":    entry.Attributes,
+			"relationships": entry.Relationships,
+		}), nil
+	}
+}
+
+func handleSetCIMetadata(svc service.Service) mcpserver.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args setCIMetadataArgs
+		if err := request.BindArguments(&args); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid set_ci_metadata arguments: %v", err)), nil
+		}
+		if err := svc.SetCIMetadata(args.CIID, args.Attributes, args.Relationships); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		// Return the resulting entry so callers see the post-operation state.
+		entry, err := svc.GetCIMetadata(args.CIID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultStructuredOnly(map[string]any{
+			"ci_id":         entry.CIID,
+			"attributes":    entry.Attributes,
+			"relationships": entry.Relationships,
+		}), nil
 	}
 }
 
